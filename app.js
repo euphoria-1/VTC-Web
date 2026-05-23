@@ -906,6 +906,15 @@ function drawArrows(ctx, grid, maxMag, kind) {
         gyMin = Math.floor(gyMin / step) * step;
     }
 
+    // Hoist the rotation transform out of the per-cell loop.  We do the
+    // visibility cull against POST-rotation screen coords; worldToScreen
+    // returns pre-rotation coords (the canvas transform applies the
+    // rotation visually at drawImage time).
+    const isRot = view.rotation !== 0;
+    const rotCx = view.canvasW / 2, rotCy = view.canvasH / 2;
+    const cosR = isRot ? Math.cos(view.rotation) : 1;
+    const sinR = isRot ? Math.sin(view.rotation) : 0;
+
     for (let gy = gyMin; gy <= gyMax; gy += step) {
         for (let gx = gxMin; gx <= gxMax; gx += step) {
             let mag, dir;
@@ -925,8 +934,17 @@ function drawArrows(ctx, grid, maxMag, kind) {
             const wy = b.ymin + gy * worldDy;
             const p  = worldToScreen(wx, wy);
 
-            if (p.x < -20 || p.x > view.canvasW + 20 ||
-                p.y < -20 || p.y > view.canvasH + 20) continue;
+            // Cull against the POST-rotation screen position so the
+            // rotated visible area is respected, not the axis-aligned
+            // canvas rectangle in pre-rotation coords.
+            let visX = p.x, visY = p.y;
+            if (isRot) {
+                const dx = p.x - rotCx, dy = p.y - rotCy;
+                visX = dx * cosR - dy * sinR + rotCx;
+                visY = dx * sinR + dy * cosR + rotCy;
+            }
+            if (visX < -20 || visX > view.canvasW + 20 ||
+                visY < -20 || visY > view.canvasH + 20) continue;
 
             const color = (kind === 'wind')
                 ? getWindColor(mag / maxMag)
