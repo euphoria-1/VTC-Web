@@ -1412,8 +1412,25 @@ function unpinTide() {
     }
 }
 // Internal step is in SECONDS. The "5 min" buttons add/subtract 300.
-const SLIDER_MAX_SEC = 43200;  // 12 h — will drop to 3600 (1 h) after a
-                                // course is imported in a future change.
+// SLIDER_MAX_SEC defaults to 12 h (no course); when a course is loaded
+// via ?code= the range narrows to 1 h.  Use setSliderMax() to change.
+let SLIDER_MAX_SEC = 43200;
+
+function setSliderMax(secs) {
+    SLIDER_MAX_SEC = secs;
+    const slider = document.getElementById('vert-slider');
+    if (slider) slider.max = secs;
+    if (state.sliderSeconds > secs) {
+        state.sliderSeconds = secs;
+        if (slider) slider.value = secs;
+    }
+    const lbl = document.getElementById('slider-top-label');
+    if (lbl) {
+        const h = Math.floor(secs / 3600);
+        const m = Math.floor((secs % 3600) / 60);
+        lbl.textContent = '+' + (h > 0 ? h + 'h' : '') + (m > 0 ? m + 'm' : (h === 0 ? '0m' : ''));
+    }
+}
 function stepSlider(deltaSec) {
     let v = state.sliderSeconds + deltaSec;
     if (v < 0) v = 0;
@@ -1771,16 +1788,21 @@ window.addEventListener('resize', () => {
             });
         }
     }
+    // Course (sent by the AHK app inside the base64 payload).
+    // When a course is present, narrow the slider to 1 hour — race
+    // planning at second-precision only makes sense for the immediate
+    // window around the start; the 12 h scrub mode is for free-roaming
+    // tide preview without a course.
+    if (codeData && codeData.course && codeData.course.SL) {
+        state.course = codeData.course;
+        setSliderMax(3600);
+    }
+
     if (p('t') != null) {
         const t = parseInt(p('t'), 10) || 0;
         // URL param now interpreted as seconds (matches the slider).
         state.sliderSeconds = Math.max(0, Math.min(SLIDER_MAX_SEC, t));
         document.getElementById('vert-slider').value = state.sliderSeconds;
-    }
-
-    // Course (sent by the AHK app inside the base64 payload).
-    if (codeData && codeData.course && codeData.course.SL) {
-        state.course = codeData.course;
     }
 
     setCanvasSize();
