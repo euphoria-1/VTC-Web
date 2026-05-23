@@ -405,6 +405,94 @@
     }
     #legend .val { color: #fff; }
 
+    /* Locked-mode overlay buttons (shown when a course was loaded via
+       URL — the sidebar is fully hidden and only these two toggles +
+       the slider remain interactive). */
+    #lock-toggles {
+        position: absolute;
+        bottom: 14px;
+        left: 14px;
+        display: none;
+        gap: 8px;
+        z-index: 6;
+    }
+    body.locked-mode #lock-toggles { display: flex; }
+    body.locked-mode #sidebar      { display: none; }
+    body.locked-mode #expand-sidebar { display: none !important; }
+    .lock-btn {
+        padding: 6px 12px;
+        border: 1px solid #6aa9d8;
+        border-radius: 14px;
+        background: #6aa9d8;
+        color: #fff;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        min-width: 60px;
+    }
+    .lock-btn:hover { background: #5a99c8; }
+    .lock-btn.active {
+        background: #e34a3a;
+        border-color: #e34a3a;
+    }
+
+    /* Tidal-phase indicator (top-right of canvas, to the left of the
+       slider).  Shows the two tides currently being blended and the
+       weighting between them, styled like a sailing-instrument readout. */
+    #blend-indicator {
+        position: absolute;
+        top: 14px;
+        right: 90px;        /* leaves room for the vertical slider */
+        background: rgba(20,20,28,0.85);
+        border: 1px solid rgba(255,255,255,0.18);
+        border-radius: 8px;
+        padding: 8px 12px 6px;
+        min-width: 180px;
+        max-width: 220px;
+        color: #fff;
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        display: none;
+    }
+    #blend-indicator .bar {
+        position: relative;
+        height: 6px;
+        background: rgba(255,255,255,0.16);
+        border-radius: 3px;
+        margin-bottom: 4px;
+    }
+    #blend-indicator .bar .fill {
+        position: absolute;
+        top: 0; left: 0; height: 100%;
+        background: linear-gradient(90deg, #d18b1a 0%, #f3a829 100%);
+        border-radius: 3px;
+        transition: width 100ms linear;
+    }
+    #blend-indicator .pcts {
+        display: flex;
+        justify-content: space-between;
+        font-size: 11px;
+        color: #ddd;
+        margin-bottom: 1px;
+    }
+    #blend-indicator .lbls {
+        display: flex;
+        justify-content: space-between;
+        font-size: 11px;
+        letter-spacing: 0.7px;
+        font-weight: 700;
+        color: #f0f0f0;
+    }
+    #blend-indicator .dot {
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #f3a829;
+        vertical-align: middle;
+        margin: 0 4px;
+    }
+
     /* Touch-device crosshair: a fixed "+" at the centre of the canvas
        used as the tooltip sample point when there's no hover. Hidden on
        mouse-primary devices via the `.touch-mode` body class set by JS. */
@@ -527,12 +615,14 @@
                 <button class="btn wind-btn" data-wind="north_west">NW</button>
             </div>
 
-            <!-- Current column -->
+            <!-- Current column — ordered TOP→BOTTOM so phase progression
+                 moves UPWARD with the right-side slider: Ebb above High
+                 above Flood above Low. -->
             <div class="col" id="current-col">
                 <button class="btn tide-btn" data-tide="ebb">Ebb</button>
-                <button class="btn tide-btn" data-tide="low">Low</button>
-                <button class="btn tide-btn" data-tide="flood">Flood</button>
                 <button class="btn tide-btn" data-tide="high">High</button>
+                <button class="btn tide-btn" data-tide="flood">Flood</button>
+                <button class="btn tide-btn" data-tide="low">Low</button>
             </div>
         </div>
 
@@ -597,6 +687,25 @@
         <div id="tooltip"></div>
         <div id="crosshair"></div>
         <button id="expand-sidebar" title="Show menu">&#9654;</button>
+
+        <!-- Locked-mode overlay (shown only when ?code= delivers a course) -->
+        <div id="lock-toggles">
+            <button class="lock-btn" id="lock-wind-btn">Wind</button>
+            <button class="lock-btn" id="lock-current-btn">Current</button>
+        </div>
+
+        <!-- Tidal-phase indicator (shown when a course is loaded) -->
+        <div id="blend-indicator">
+            <div class="bar"><div class="fill" id="blend-fill"></div></div>
+            <div class="pcts">
+                <span id="blend-pct-left">0%</span>
+                <span id="blend-pct-right">100%</span>
+            </div>
+            <div class="lbls">
+                <span><span class="dot"></span><span id="blend-lbl-left">EBB</span></span>
+                <span><span id="blend-lbl-right">LOW</span><span class="dot"></span></span>
+            </div>
+        </div>
 
         <div id="slider-wrap" style="display:none;">
             <div class="label" id="slider-top-label">+12h</div>

@@ -306,6 +306,12 @@ const state = {
     //     is clicked while a main tide is pinned
     _intermediateSnapshot: null,
 
+    // Locked mode: true when the page was opened with a course payload
+    // — sidebar hidden, only the slider and the two lock toggles
+    // (Wind / Current) are interactive.
+    locked: false,
+    _lockedWind: null,           // wind direction baked in by the URL
+
     // Course (start line, finish line, legs with marks/gates/arcs) —
     // decoded from the ?code= URL parameter sent by the AHK app.
     //   course.SL    { leftX, leftY, rightX, rightY }
@@ -457,7 +463,8 @@ const view = {
     canvasW: 0,
     canvasH: 0,
     ax: 0, bx: 0,   // fitted matrix:  fittedX = ax*wx + bx
-    ay: 0, by: 0
+    ay: 0, by: 0,
+    rotation: 0     // radians; positive rotates the rendered map clockwise
 };
 
 // Additional pan/zoom layered on top of the fitted matrix.
@@ -518,6 +525,26 @@ function fitView() {
     viewport.scale = 1;
     viewport.panX = 0;
     viewport.panY = 0;
+
+    // Rotation: when a course is loaded, rotate so the first leg points
+    // UP on screen (matching a sailor's "course up" chart orientation).
+    view.rotation = 0;
+    if (state.course && state.course.Legs && state.course.Legs.length > 0) {
+        const c0 = state.course;
+        const leg0 = c0.Legs[0];
+        const slMidX = (c0.SL.leftX + c0.SL.rightX) / 2;
+        const slMidY = (c0.SL.leftY + c0.SL.rightY) / 2;
+        const startX = (typeof leg0.startX === 'number') ? leg0.startX : slMidX;
+        const startY = (typeof leg0.startY === 'number') ? leg0.startY : slMidY;
+        const dx = leg0.endX - startX;
+        const dy = leg0.endY - startY;
+        if (dx !== 0 || dy !== 0) {
+            // The viewport rotation angle θ such that the leg direction
+            // (vx, vy) ends up pointing to screen (0, −1) — see
+            // derivation in commit notes.
+            view.rotation = Math.atan2(dx, dy);
+        }
+    }
 }
 
 // Compute the axis-aligned bounding box covering every mark of the
@@ -554,10 +581,37 @@ function worldToScreen(wx, wy) {
     };
 }
 
-function screenToWorld(sx, sy) {
+// Undo only the canvas-level rotation (not pan/zoom).  Returns the
+// "pre-rotation" screen position — what worldToScreen would produce
+// for the same point.  Used by zoom/pinch handlers to keep the cursor
+// anchored over a world point while scale changes.
+function unrotateScreen(sx, sy) {
+    if (view.rotation === 0) return { x: sx, y: sy };
     const cx = view.canvasW / 2, cy = view.canvasH / 2;
-    const fittedX = (sx - viewport.panX - cx) / viewport.scale + cx;
-    const fittedY = (sy - viewport.panY - cy) / viewport.scale + cy;
+    const dx = sx - cx, dy = sy - cy;
+    const cosR = Math.cos(-view.rotation);
+    const sinR = Math.sin(-view.rotation);
+    return {
+        x: dx * cosR - dy * sinR + cx,
+        y: dx * sinR + dy * cosR + cy
+    };
+}
+
+function screenToWorld(sx, sy) {
+    // Undo the canvas-level rotation applied in render() so the inverse
+    // mapping lines up with worldToScreen (which returns pre-rotation
+    // coords).  No-op when view.rotation === 0.
+    const cx = view.canvasW / 2, cy = view.canvasH / 2;
+    let lx = sx, ly = sy;
+    if (view.rotation !== 0) {
+        const dx = sx - cx, dy = sy - cy;
+        const cosR = Math.cos(-view.rotation);
+        const sinR = Math.sin(-view.rotation);
+        lx = dx * cosR - dy * sinR + cx;
+        ly = dx * sinR + dy * cosR + cy;
+    }
+    const fittedX = (lx - viewport.panX - cx) / viewport.scale + cx;
+    const fittedY = (ly - viewport.panY - cy) / viewport.scale + cy;
     return {
         x: (fittedX - view.bx) / view.ax,
         y: (fittedY - view.by) / view.ay
@@ -571,8 +625,19 @@ function screenToWorld(sx, sy) {
 function render() {
     const c = document.getElementById('map-canvas');
     const ctx = c.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, c.width, c.height);
     if (!state.map) return;
+
+    // Apply the chart "course-up" rotation (no-op unless a course was
+    // loaded).  All worldToScreen results remain in pre-rotation coords
+    // and the canvas transform handles the final visual rotation.
+    if (view.rotation !== 0) {
+        const cx = view.canvasW / 2, cy = view.canvasH / 2;
+        ctx.translate(cx, cy);
+        ctx.rotate(view.rotation);
+        ctx.translate(-cx, -cy);
+    }
 
     const showWind = state.wind && state.activeWindGrid && state.windMaxMag > 0;
     const showCurr = state.showCurrent && state.activeCurrentGrid && state.currentMaxMag > 0;
@@ -1152,6 +1217,7 @@ function updateHud() {
 
     updateBlendButton();
     updateLegend();
+    updateBlendIndicator();
 }
 
 // -------------------------------------------------------------------------
@@ -1233,34 +1299,98 @@ function updateBlendButton() {
     }
 
     const pct = Math.round(bs.w2 * 100);
-    // 4-line label: stateA / ↓ / stateB / percent.
+    // 4-line label: stateB (destination, above) / ↑ / stateA (origin,
+    // below) / percent.  Matches the new column order where phase
+    // progresses upward with the right-side slider.
     btn.innerHTML =
-        `<span class="blend-line">${ABBR[bs.state1]}</span>` +
-        `<span class="blend-line blend-arrow">↓</span>` +
         `<span class="blend-line">${ABBR[bs.state2]}</span>` +
+        `<span class="blend-line blend-arrow">↑</span>` +
+        `<span class="blend-line">${ABBR[bs.state1]}</span>` +
         `<span class="blend-line">${pct}%</span>`;
     // "Active" (red) only when the layer is currently visible AT this
     // intermediate (i.e. no main tide is overriding it).
     btn.classList.toggle('active', !state.tideButton && state.showCurrent);
     btn.style.display = '';
 
-    // Insert at the correct column position based on cycle direction:
-    //   low → flood  : between Low and Flood
-    //   flood → high : between Flood and High
-    //   high → ebb   : after High (cycle wraps out of column)
-    //   ebb → low    : between Ebb and Low
+    // Insert ABOVE the relevant tide button (column order top→bottom:
+    // Ebb, High, Flood, Low — phase rises upward through the column):
+    //   low → flood  : above Low     (= insertBefore Low)
+    //   flood → high : above Flood   (= insertBefore Flood)
+    //   high → ebb   : above High    (= insertBefore High)
+    //   ebb → low    : above Ebb     (= insertBefore Ebb, top of column)
     const ref = {
-        'low|flood':  col.querySelector('[data-tide="flood"]'),
-        'flood|high': col.querySelector('[data-tide="high"]'),
-        'high|ebb':   null,   // append at end
-        'ebb|low':    col.querySelector('[data-tide="low"]')
+        'low|flood':  col.querySelector('[data-tide="low"]'),
+        'flood|high': col.querySelector('[data-tide="flood"]'),
+        'high|ebb':   col.querySelector('[data-tide="high"]'),
+        'ebb|low':    col.querySelector('[data-tide="ebb"]')
     }[bs.state1 + '|' + bs.state2];
 
-    if (ref) {
-        if (btn.nextSibling !== ref) col.insertBefore(btn, ref);
-    } else {
-        if (col.lastChild !== btn) col.appendChild(btn);
+    if (ref && btn.nextSibling !== ref) col.insertBefore(btn, ref);
+}
+
+// -------------------------------------------------------------------------
+// Locked mode + bottom-left wind/current toggles + blend indicator
+// -------------------------------------------------------------------------
+
+function enterLockedMode() {
+    state.locked = true;
+    state._lockedWind = state.wind;     // remember the URL-supplied direction
+    document.body.classList.add('locked-mode');
+    document.getElementById('blend-indicator').style.display = 'block';
+    refreshLockToggles();
+}
+
+function refreshLockToggles() {
+    const wbtn = document.getElementById('lock-wind-btn');
+    const cbtn = document.getElementById('lock-current-btn');
+    if (wbtn) {
+        wbtn.classList.toggle('active', !!state.wind);
+        wbtn.textContent = state.wind ? 'Wind' : 'Wind';
     }
+    if (cbtn) cbtn.classList.toggle('active', state.showCurrent);
+}
+
+document.getElementById('lock-wind-btn').addEventListener('click', async () => {
+    if (!state.locked) return;
+    state.wind = state.wind ? null : (state._lockedWind || 'north');
+    document.querySelectorAll('.wind-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.wind === state.wind);
+    });
+    await refreshActiveLayers();
+    refreshLockToggles();
+    updateHud();
+    render();
+});
+
+document.getElementById('lock-current-btn').addEventListener('click', async () => {
+    if (!state.locked) return;
+    state.showCurrent = !state.showCurrent;
+    state.tideButton = null;
+    document.querySelectorAll('.tide-btn').forEach(b => b.classList.remove('active'));
+    await refreshActiveLayers();
+    refreshLockToggles();
+    updateHud();
+    render();
+});
+
+// Tidal-phase indicator: shows current blend weighting (e.g. EBB 30% | LOW 70%)
+// in the top-right of the canvas whenever a course is loaded.
+function updateBlendIndicator() {
+    const root = document.getElementById('blend-indicator');
+    if (!root) return;
+    if (!state.locked || !state.map) {
+        root.style.display = 'none';
+        return;
+    }
+    const bs = getTideBlendStates(phaseNow());
+    // Always show in locked mode — even at pure tide moments — so the
+    // user has a stable readout of where they are in the cycle.
+    root.style.display = 'block';
+    document.getElementById('blend-fill').style.width = (bs.w2 * 100).toFixed(1) + '%';
+    document.getElementById('blend-pct-left').textContent  = Math.round(bs.w1 * 100) + '%';
+    document.getElementById('blend-pct-right').textContent = Math.round(bs.w2 * 100) + '%';
+    document.getElementById('blend-lbl-left').textContent  = ABBR[bs.state1].toUpperCase();
+    document.getElementById('blend-lbl-right').textContent = ABBR[bs.state2].toUpperCase();
 }
 
 // -------------------------------------------------------------------------
@@ -1542,8 +1672,20 @@ canvasEl.addEventListener('pointermove', e => {
 
     if (pointers.size === 1 && dragInfo && dragInfo.pid === e.pointerId) {
         const dpr = window.devicePixelRatio || 1;
-        viewport.panX = dragInfo.panX + (e.clientX - dragInfo.sx) * dpr;
-        viewport.panY = dragInfo.panY + (e.clientY - dragInfo.sy) * dpr;
+        // Drag delta in CSS-pixel screen coords.  When the canvas is
+        // rotated (course-up mode), we need to express that delta in
+        // pre-rotation coords before adding it to viewport.pan*.
+        let dsx = (e.clientX - dragInfo.sx) * dpr;
+        let dsy = (e.clientY - dragInfo.sy) * dpr;
+        if (view.rotation !== 0) {
+            const cosR = Math.cos(-view.rotation);
+            const sinR = Math.sin(-view.rotation);
+            const rx = dsx * cosR - dsy * sinR;
+            const ry = dsx * sinR + dsy * cosR;
+            dsx = rx; dsy = ry;
+        }
+        viewport.panX = dragInfo.panX + dsx;
+        viewport.panY = dragInfo.panY + dsy;
         render();
     } else if (pointers.size === 2 && pinchInfo) {
         const pts = [...pointers.values()];
@@ -1553,17 +1695,28 @@ canvasEl.addEventListener('pointermove', e => {
 
         // Translate by midpoint delta.
         const dpr = window.devicePixelRatio || 1;
-        viewport.panX += (midX - pinchInfo.midX) * dpr;
-        viewport.panY += (midY - pinchInfo.midY) * dpr;
+        // Midpoint translation (in pre-rotation coords).
+        let dMidX = (midX - pinchInfo.midX) * dpr;
+        let dMidY = (midY - pinchInfo.midY) * dpr;
+        if (view.rotation !== 0) {
+            const cosR = Math.cos(-view.rotation);
+            const sinR = Math.sin(-view.rotation);
+            const rx = dMidX * cosR - dMidY * sinR;
+            const ry = dMidX * sinR + dMidY * cosR;
+            dMidX = rx; dMidY = ry;
+        }
+        viewport.panX += dMidX;
+        viewport.panY += dMidY;
 
-        // Zoom centered on midpoint.
+        // Zoom centered on midpoint — same cursor-anchor math as wheel.
         const cv = cssToCanvas({ x: midX, y: midY });
         const before = screenToWorld(cv.x, cv.y);
         const factor = dist / pinchInfo.dist;
         viewport.scale = Math.max(0.05, Math.min(80, viewport.scale * factor));
-        const after = worldToScreen(before.x, before.y);
-        viewport.panX += cv.x - after.x;
-        viewport.panY += cv.y - after.y;
+        const after  = worldToScreen(before.x, before.y);
+        const target = unrotateScreen(cv.x, cv.y);
+        viewport.panX += target.x - after.x;
+        viewport.panY += target.y - after.y;
 
         pinchInfo.dist = dist;
         pinchInfo.midX = midX;
@@ -1596,9 +1749,10 @@ canvasEl.addEventListener('wheel', e => {
     const before = screenToWorld(cv.x, cv.y);
     const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
     viewport.scale = Math.max(0.05, Math.min(80, viewport.scale * factor));
-    const after = worldToScreen(before.x, before.y);
-    viewport.panX += cv.x - after.x;
-    viewport.panY += cv.y - after.y;
+    const after  = worldToScreen(before.x, before.y);      // pre-rotation
+    const target = unrotateScreen(cv.x, cv.y);             // pre-rotation
+    viewport.panX += target.x - after.x;
+    viewport.panY += target.y - after.y;
     render();
 }, { passive: false });
 
@@ -1816,13 +1970,13 @@ window.addEventListener('resize', () => {
         }
     }
     // Course (sent by the AHK app inside the base64 payload).
-    // When a course is present, narrow the slider to 1 hour — race
-    // planning at second-precision only makes sense for the immediate
-    // window around the start; the 12 h scrub mode is for free-roaming
-    // tide preview without a course.
+    // When a course is present, narrow the slider to 1 hour AND enter
+    // locked / read-only mode: the sidebar is hidden, only the slider +
+    // two bottom-left toggles (Wind / Current) remain interactive.
     if (codeData && codeData.course && codeData.course.SL) {
         state.course = codeData.course;
         setSliderMax(3600);
+        enterLockedMode();
     }
 
     if (p('t') != null) {
