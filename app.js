@@ -54,7 +54,9 @@ const LAND_MAPS = {
     Wight:        { LeftX: 49496, RightX: 6382, TopZ: 38669, BottomZ: 10107 }
 };
 
-const NO_TIDE_MAPS = new Set(['PortoCervo']);
+// Maps where the tide data is unreliable (or absent on disk).  Tide
+// buttons + heatmap are disabled for these.
+const NO_TIDE_MAPS = new Set(['PortoCervo', 'Valencia', 'Trapani']);
 
 // Tide-button "race start time" offsets (relative to high tide time).
 // Ebb is 9h before, Low is 6h before, Flood is 3h before, High is same.
@@ -295,11 +297,14 @@ const state = {
     prestartMinutes: 3,            // prestart countdown (subtracted from chrono)
     windForce:       'F5',         // Beaufort force for wind speed scaling
 
-    // Single-level snapshot of (slider + start + showCurrent + tideButton)
-    // captured just before a main tide button is pinned.  Restored when
-    // the active tide button is clicked a second time, so the user lands
-    // back on the intermediate state they were viewing (instead of "off").
-    _tidePinSnapshot: null,
+    // Slider/start position from the last "intermediate" view (current
+    // visible at a non-pure-tide phase).  Captured when transitioning
+    // FROM intermediate to a pinned main tide.  Used to:
+    //   - keep the intermediate button visible after toggling a main
+    //     tide off (so the user can click it to come back)
+    //   - restore the intermediate state when the intermediate button
+    //     is clicked while a main tide is pinned
+    _intermediateSnapshot: null,
 
     landImages: {},
     windBins: {},
@@ -554,6 +559,23 @@ function render() {
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img, x, y, w, h);
     }
+
+    // Touch mode: keep the centre-anchored tooltip in sync with the
+    // current pan/zoom — call AFTER render so all transforms are settled.
+    if (IS_TOUCH) updateCenterTooltip();
+
+    // Reposition the "show sidebar" button (when collapsed) so it sits
+    // just below the top-overlay row, under whichever block is leftmost.
+    positionExpandButton();
+}
+
+function positionExpandButton() {
+    const btn = document.getElementById('expand-sidebar');
+    if (!btn || btn.style.display === 'none') return;
+    const overlay = document.getElementById('top-overlay');
+    const rect = overlay.getBoundingClientRect();
+    btn.style.top  = (rect.bottom + 8) + 'px';
+    btn.style.left = (rect.left) + 'px';
 }
 
 function drawArrows(ctx, grid, maxMag, kind) {
@@ -936,8 +958,21 @@ function ensureBlendButton() {
     _blendBtn.className = 'btn tide-btn blend-btn';
     _blendBtn.style.display = 'none';
     _blendBtn.addEventListener('click', async () => {
-        // Toggle the current layer on/off.  Always unpin any fixed tide.
-        state.showCurrent = !state.showCurrent;
+        // If a snapshot exists (captured before a main tide was pinned),
+        // RESTORE the intermediate slider/start position and turn the
+        // current layer ON.  Otherwise just toggle the layer at the
+        // current slider position.  Either way the pin is cleared.
+        const snap = state._intermediateSnapshot;
+        if (snap) {
+            state.startSeconds  = snap.startSeconds;
+            state.sliderSeconds = snap.sliderSeconds;
+            document.getElementById('start-time').value  = secsToHHMMSS(snap.startSeconds);
+            document.getElementById('vert-slider').value = snap.sliderSeconds;
+            state._intermediateSnapshot = null;
+            state.showCurrent = true;
+        } else {
+            state.showCurrent = !state.showCurrent;
+        }
         state.tideButton = null;
         document.querySelectorAll('.tide-btn').forEach(b => b.classList.remove('active'));
         await refreshActiveLayers();
@@ -1023,32 +1058,32 @@ document.querySelectorAll('.tide-btn').forEach(btn => {
         const t = btn.dataset.tide;
 
         if (state.tideButton === t) {
-            // Second click on the active tide button:  restore the state
-            // captured at pin time (so the user lands back on the
-            // intermediate blend they were viewing).  If no snapshot
-            // exists (we pinned from "off") just turn current off.
-            const snap = state._tidePinSnapshot;
+            // Second click on the SAME active tide button → turn off.
+            // We also restore the slider/start to the intermediate
+            // position (if any) so the intermediate button stays visible
+            // and the user can return to it without losing context.
+            const snap = state._intermediateSnapshot;
             if (snap) {
-                state.tideButton    = snap.tideButton;
-                state.showCurrent   = snap.showCurrent;
                 state.startSeconds  = snap.startSeconds;
                 state.sliderSeconds = snap.sliderSeconds;
                 document.getElementById('start-time').value  = secsToHHMMSS(snap.startSeconds);
                 document.getElementById('vert-slider').value = snap.sliderSeconds;
-                state._tidePinSnapshot = null;
-            } else {
-                state.tideButton = null;
-                state.showCurrent = false;
+                // Keep the snapshot — the user may click the
+                // intermediate button next to come back.
             }
+            state.tideButton = null;
+            state.showCurrent = false;
         } else {
-            // Pinning a (new) tide button.  Capture the prior state so a
-            // second click on this button can restore it.
-            state._tidePinSnapshot = {
-                tideButton:    state.tideButton,
-                showCurrent:   state.showCurrent,
-                startSeconds:  state.startSeconds,
-                sliderSeconds: state.sliderSeconds
-            };
+            // Pinning a (new) main tide.  If we're coming from a non-
+            // pinned state, the current slider/start IS the user's
+            // intermediate position — capture it.  When switching
+            // between mains (was already pinned) the snapshot stays.
+            if (state.tideButton === null) {
+                state._intermediateSnapshot = {
+                    startSeconds:  state.startSeconds,
+                    sliderSeconds: state.sliderSeconds
+                };
+            }
             state.tideButton = t;
             state.showCurrent = true;
             // Move race start so the displayed (slider = 0) moment IS this
@@ -1108,6 +1143,27 @@ attachTimeInput('high-tide-time', s => {
         state.sliderSeconds = 0;
         document.getElementById('vert-slider').value = 0;
     }
+});
+
+// Sidebar collapse / expand.
+const sidebarEl       = document.getElementById('sidebar');
+const collapseBtnEl   = document.getElementById('collapse-sidebar');
+const expandBtnEl     = document.getElementById('expand-sidebar');
+
+collapseBtnEl.addEventListener('click', e => {
+    e.stopPropagation();
+    sidebarEl.classList.add('collapsed');
+    expandBtnEl.style.display = 'block';
+    // Canvas dimensions just changed → refit / re-render.
+    fitView();
+    render();
+});
+
+expandBtnEl.addEventListener('click', () => {
+    sidebarEl.classList.remove('collapsed');
+    expandBtnEl.style.display = 'none';
+    fitView();
+    render();
 });
 
 // Wind strength (F3..F7) radio buttons.
@@ -1300,12 +1356,47 @@ canvasEl.addEventListener('dblclick', () => {
 
 // -------------------------------------------------------------------------
 // Tooltip
+//
+// On mouse-primary devices the tooltip follows the cursor.  On touch
+// devices we instead sample the canvas centre (where #crosshair sits) and
+// position the tooltip just above it — this gives mobile / tablet users
+// a way to read wind / current values without a true "hover" gesture.
 // -------------------------------------------------------------------------
 
 const tooltipEl = document.getElementById('tooltip');
+const IS_TOUCH  = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+if (IS_TOUCH) document.body.classList.add('touch-mode');
 
 function hideTooltip() {
+    if (IS_TOUCH) return;   // touch tooltip stays pinned to centre
     tooltipEl.style.display = 'none';
+}
+
+// Touch-mode: sample whatever world coord is under the canvas centre
+// (where the crosshair sits) and display the tooltip just above it.
+function updateCenterTooltip() {
+    if (!state.map) { tooltipEl.style.display = 'none'; return; }
+    if (!state.activeWindGrid && !state.activeCurrentGrid) {
+        tooltipEl.style.display = 'none';
+        return;
+    }
+    const canvas = canvasEl;
+    const cssW = canvas.clientWidth, cssH = canvas.clientHeight;
+    const cssX = cssW / 2, cssY = cssH / 2;
+    // Synthesize a "pointermove-like" event at the centre.
+    const rect = canvas.getBoundingClientRect();
+    updateTooltip({ clientX: rect.left + cssX, clientY: rect.top + cssY });
+    if (tooltipEl.style.display === 'block') {
+        // Re-position: just above the crosshair, centred horizontally.
+        const ttW = tooltipEl.offsetWidth;
+        const ttH = tooltipEl.offsetHeight;
+        let left = rect.left + cssX - ttW / 2;
+        let top  = rect.top + cssY - ttH - 22;     // 22 ≈ crosshair half + gap
+        if (left < 6) left = 6;
+        if (top  < 6) top  = rect.top + cssY + 22; // flip below if no room above
+        tooltipEl.style.left = left + 'px';
+        tooltipEl.style.top  = top + 'px';
+    }
 }
 
 // -------------------------------------------------------------------------
