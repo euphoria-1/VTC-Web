@@ -306,6 +306,17 @@ const state = {
     //     is clicked while a main tide is pinned
     _intermediateSnapshot: null,
 
+    // Course (start line, finish line, legs with marks/gates/arcs) —
+    // decoded from the ?code= URL parameter sent by the AHK app.
+    //   course.SL    { leftX, leftY, rightX, rightY }
+    //   course.FL    { leftX, leftY, rightX, rightY }
+    //   course.Legs  [{ startX?, startY?, endX, endY,
+    //                   isGate, gate?: { leftX, leftY, rightX, rightY },
+    //                   arc?:   { centerX, centerY, radius,
+    //                              entryX, entryY, exitX, exitY } }, ...]
+    // Game coords are in metres, same convention as MAPS[mapName].
+    course: null,
+
     landImages: {},
     windBins: {},
     tideBins: {},
@@ -462,18 +473,29 @@ function setCanvasSize() {
     view.canvasH = c.height;
 }
 
-// Fit to the LAND bounding box, per latest spec. The grid (vector data)
-// usually extends a bit beyond land; user can scroll/zoom to see it.
+// Fit to the COURSE if one is loaded (so the race area dominates the
+// view), else to the LAND bounding box.  The grid usually extends a bit
+// beyond land; the user can scroll/zoom to see further.
 function fitView() {
     setCanvasSize();
     if (!state.map) return;
     const dpr = window.devicePixelRatio || 1;
-    const lb = LAND_MAPS[state.map];
 
-    const xmin = Math.min(lb.LeftX, lb.RightX);
-    const xmax = Math.max(lb.LeftX, lb.RightX);
-    const ymin = Math.min(lb.BottomZ, lb.TopZ);
-    const ymax = Math.max(lb.BottomZ, lb.TopZ);
+    let xmin, xmax, ymin, ymax;
+    const cb = courseBounds();
+    if (cb) {
+        // Pad the course bbox by ~15 % so marks aren't right on the edge.
+        const padX = (cb.xmax - cb.xmin) * 0.15;
+        const padY = (cb.ymax - cb.ymin) * 0.15;
+        xmin = cb.xmin - padX; xmax = cb.xmax + padX;
+        ymin = cb.ymin - padY; ymax = cb.ymax + padY;
+    } else {
+        const lb = LAND_MAPS[state.map];
+        xmin = Math.min(lb.LeftX, lb.RightX);
+        xmax = Math.max(lb.LeftX, lb.RightX);
+        ymin = Math.min(lb.BottomZ, lb.TopZ);
+        ymax = Math.max(lb.BottomZ, lb.TopZ);
+    }
 
     const margin = 16 * dpr;
     const w = xmax - xmin;
@@ -496,6 +518,30 @@ function fitView() {
     viewport.scale = 1;
     viewport.panX = 0;
     viewport.panY = 0;
+}
+
+// Compute the axis-aligned bounding box covering every mark of the
+// course, or null if no course is loaded.  Game-meter coords.
+function courseBounds() {
+    const c = state.course;
+    if (!c || !c.SL) return null;
+    let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
+    const add = (x, y) => {
+        if (typeof x !== 'number' || typeof y !== 'number') return;
+        if (x < xmin) xmin = x;
+        if (x > xmax) xmax = x;
+        if (y < ymin) ymin = y;
+        if (y > ymax) ymax = y;
+    };
+    add(c.SL.leftX, c.SL.leftY); add(c.SL.rightX, c.SL.rightY);
+    if (c.FL) { add(c.FL.leftX, c.FL.leftY); add(c.FL.rightX, c.FL.rightY); }
+    if (c.Legs) for (const l of c.Legs) {
+        add(l.endX, l.endY);
+        if (l.gate) { add(l.gate.leftX, l.gate.leftY); add(l.gate.rightX, l.gate.rightY); }
+        if (l.arc)  { add(l.arc.centerX, l.arc.centerY); }
+    }
+    if (!isFinite(xmin)) return null;
+    return { xmin, xmax, ymin, ymax };
 }
 
 function worldToScreen(wx, wy) {
@@ -560,6 +606,11 @@ function render() {
         ctx.drawImage(img, x, y, w, h);
     }
 
+    // 4. Course (start line, legs, gates, arcs, finish line, mark circles)
+    if (state.course && state.course.SL) {
+        drawCourse(ctx);
+    }
+
     // Touch mode: keep the centre-anchored tooltip in sync with the
     // current pan/zoom — call AFTER render so all transforms are settled.
     if (IS_TOUCH) updateCenterTooltip();
@@ -567,6 +618,166 @@ function render() {
     // Reposition the "show sidebar" button (when collapsed) so it sits
     // just below the top-overlay row, under whichever block is leftmost.
     positionExpandButton();
+}
+
+// -------------------------------------------------------------------------
+// Course rendering — port of the equivalent logic in VCT.ahk so the
+// startline / legs / gates / arcs / finish line / mark circles look the
+// same on both sides.
+// -------------------------------------------------------------------------
+function drawCourse(ctx) {
+    const c   = state.course;
+    const dpr = window.devicePixelRatio || 1;
+
+    // Helper: world (game meters) → screen pixels.
+    const g2s = (x, y) => worldToScreen(x, y);
+
+    // Pixels-per-game-metre at the current zoom.
+    const mPerPx = Math.abs(view.ax) * viewport.scale;
+
+    // 1) Start line — bright green.
+    const sl1 = g2s(c.SL.leftX,  c.SL.leftY);
+    const sl2 = g2s(c.SL.rightX, c.SL.rightY);
+    ctx.lineWidth   = 3 * dpr;
+    ctx.lineCap     = 'round';
+    ctx.strokeStyle = '#00FF00';
+    ctx.beginPath();
+    ctx.moveTo(sl1.x, sl1.y);
+    ctx.lineTo(sl2.x, sl2.y);
+    ctx.stroke();
+    const slMid = { x: (sl1.x + sl2.x) / 2, y: (sl1.y + sl2.y) / 2 };
+
+    // 2) Legs (white straight + arrowhead + optional arc + optional gate).
+    if (c.Legs && c.Legs.length) {
+        for (let i = 0; i < c.Legs.length; i++) {
+            const leg = c.Legs[i];
+            const sPt = (typeof leg.startX === 'number')
+                ? g2s(leg.startX, leg.startY) : slMid;
+            const ePt = g2s(leg.endX, leg.endY);
+
+            // Straight segment.
+            ctx.lineWidth   = 2 * dpr;
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.fillStyle   = '#FFFFFF';
+            ctx.beginPath();
+            ctx.moveTo(sPt.x, sPt.y);
+            ctx.lineTo(ePt.x, ePt.y);
+            ctx.stroke();
+
+            // Arrowhead at the leg endpoint.
+            const legAng = Math.atan2(ePt.y - sPt.y, ePt.x - sPt.x);
+            const headL  = 10 * dpr;
+            const a1 = legAng + Math.PI - Math.PI / 6;
+            const a2 = legAng + Math.PI + Math.PI / 6;
+            ctx.beginPath();
+            ctx.moveTo(ePt.x, ePt.y);
+            ctx.lineTo(ePt.x + headL * Math.cos(a1), ePt.y + headL * Math.sin(a1));
+            ctx.lineTo(ePt.x + headL * Math.cos(a2), ePt.y + headL * Math.sin(a2));
+            ctx.closePath();
+            ctx.fill();
+
+            // Optional rounding arc around a mark.
+            if (leg.arc) {
+                const ac     = g2s(leg.arc.centerX, leg.arc.centerY);
+                const aEntry = g2s(leg.arc.entryX,  leg.arc.entryY);
+                const aExit  = g2s(leg.arc.exitX,   leg.arc.exitY);
+                const canvasR = Math.hypot(aEntry.x - ac.x, aEntry.y - ac.y);
+
+                const inA = Math.atan2(aEntry.y - sPt.y, aEntry.x - sPt.x);
+                let nextPt;
+                if (i + 1 < c.Legs.length) {
+                    nextPt = g2s(c.Legs[i + 1].endX, c.Legs[i + 1].endY);
+                } else if (c.FL && c.FL.leftX !== undefined) {
+                    const fl1 = g2s(c.FL.leftX,  c.FL.leftY);
+                    const fl2 = g2s(c.FL.rightX, c.FL.rightY);
+                    nextPt = { x: (fl1.x + fl2.x) / 2, y: (fl1.y + fl2.y) / 2 };
+                } else {
+                    nextPt = {
+                        x: aExit.x + (aEntry.x - sPt.x),
+                        y: aExit.y + (aEntry.y - sPt.y)
+                    };
+                }
+                const outA = Math.atan2(nextPt.y - aExit.y, nextPt.x - aExit.x);
+
+                const inDx    = aEntry.x - sPt.x;
+                const inDy    = aEntry.y - sPt.y;
+                const chordDx = aExit.x  - aEntry.x;
+                const chordDy = aExit.y  - aEntry.y;
+                const cross   = inDx * chordDy - inDy * chordDx;
+                let ccw;
+                if (Math.abs(cross) > 1e-4) {
+                    ccw = cross < 0;
+                } else {
+                    let turnA = outA - inA;
+                    while (turnA >  Math.PI) turnA -= 2 * Math.PI;
+                    while (turnA < -Math.PI) turnA += 2 * Math.PI;
+                    ccw = turnA < 0;
+                }
+
+                const startA   = ccw ? (inA  + Math.PI / 2) : (inA  - Math.PI / 2);
+                const endA     = ccw ? (outA + Math.PI / 2) : (outA - Math.PI / 2);
+                const dynamicCx = aEntry.x - canvasR * Math.cos(startA);
+                const dynamicCy = aEntry.y - canvasR * Math.sin(startA);
+
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth   = 2 * dpr;
+                ctx.beginPath();
+                ctx.arc(dynamicCx, dynamicCy, canvasR, startA, endA, ccw);
+                ctx.lineTo(aExit.x, aExit.y);  // seal exit gap
+                ctx.stroke();
+            }
+
+            // Gate line (cyan) — drawn between the two gate marks.
+            if (leg.isGate && leg.gate) {
+                const g1 = g2s(leg.gate.leftX,  leg.gate.leftY);
+                const g2_ = g2s(leg.gate.rightX, leg.gate.rightY);
+                ctx.strokeStyle = '#00FFFF';
+                ctx.lineWidth   = 2 * dpr;
+                ctx.beginPath();
+                ctx.moveTo(g1.x, g1.y);
+                ctx.lineTo(g2_.x, g2_.y);
+                ctx.stroke();
+            }
+        }
+    }
+
+    // 3) Finish line — red.
+    if (c.FL && c.FL.leftX !== undefined) {
+        const fl1 = g2s(c.FL.leftX,  c.FL.leftY);
+        const fl2 = g2s(c.FL.rightX, c.FL.rightY);
+        ctx.strokeStyle = '#FF0000';
+        ctx.lineWidth   = 3 * dpr;
+        ctx.beginPath();
+        ctx.moveTo(fl1.x, fl1.y);
+        ctx.lineTo(fl2.x, fl2.y);
+        ctx.stroke();
+    }
+
+    // 4) Mark circles (4 m physical radius — same as VCT.ahk).
+    const marks = [];
+    if (c.SL) marks.push([c.SL.leftX, c.SL.leftY], [c.SL.rightX, c.SL.rightY]);
+    if (c.FL && c.FL.leftX !== undefined)
+        marks.push([c.FL.leftX, c.FL.leftY], [c.FL.rightX, c.FL.rightY]);
+    if (c.Legs) {
+        for (const l of c.Legs) {
+            if (l.isGate && l.gate)
+                marks.push([l.gate.leftX,  l.gate.leftY],
+                           [l.gate.rightX, l.gate.rightY]);
+            else if (l.arc && l.arc.centerX !== undefined)
+                marks.push([l.arc.centerX, l.arc.centerY]);
+        }
+    }
+    const markRadiusPx = 4 * mPerPx;   // 4 m in screen pixels
+    if (markRadiusPx >= 1.5) {
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth   = 1.5 * dpr;
+        for (const [mx, my] of marks) {
+            const p = g2s(mx, my);
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, markRadiusPx, 0, 2 * Math.PI);
+            ctx.stroke();
+        }
+    }
 }
 
 function positionExpandButton() {
@@ -1565,6 +1776,11 @@ window.addEventListener('resize', () => {
         // URL param now interpreted as seconds (matches the slider).
         state.sliderSeconds = Math.max(0, Math.min(SLIDER_MAX_SEC, t));
         document.getElementById('vert-slider').value = state.sliderSeconds;
+    }
+
+    // Course (sent by the AHK app inside the base64 payload).
+    if (codeData && codeData.course && codeData.course.SL) {
+        state.course = codeData.course;
     }
 
     setCanvasSize();
