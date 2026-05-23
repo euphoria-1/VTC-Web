@@ -1169,23 +1169,32 @@ function ensureBlendButton() {
     _blendBtn.className = 'btn tide-btn blend-btn';
     _blendBtn.style.display = 'none';
     _blendBtn.addEventListener('click', async () => {
-        // If a snapshot exists (captured before a main tide was pinned),
-        // RESTORE the intermediate slider/start position and turn the
-        // current layer ON.  Otherwise just toggle the layer at the
-        // current slider position.  Either way the pin is cleared.
-        const snap = state._intermediateSnapshot;
-        if (snap) {
-            state.startSeconds  = snap.startSeconds;
-            state.sliderSeconds = snap.sliderSeconds;
-            document.getElementById('start-time').value  = secsToHHMMSS(snap.startSeconds);
-            document.getElementById('vert-slider').value = snap.sliderSeconds;
-            state._intermediateSnapshot = null;
+        // Two modes, depending on whether a main tide is currently pinned:
+        //
+        //   (A) A main tide IS pinned (slider snapped to 0 = pure tide).
+        //       The intermediate button is showing the SNAPSHOT phase.
+        //       Click → "switch to intermediate": restore the snapshot,
+        //       unpin, turn the layer on, clear the snapshot.
+        //
+        //   (B) No main tide pinned (slider is already at an intermediate
+        //       phase, blend button reflects the CURRENT phase).
+        //       Click → just toggle showCurrent on / off.  Slider stays
+        //       put; snapshot is left alone.
+        if (state.tideButton) {
+            const snap = state._intermediateSnapshot;
+            if (snap) {
+                state.startSeconds  = snap.startSeconds;
+                state.sliderSeconds = snap.sliderSeconds;
+                document.getElementById('start-time').value  = secsToHHMMSS(snap.startSeconds);
+                document.getElementById('vert-slider').value = snap.sliderSeconds;
+                state._intermediateSnapshot = null;
+            }
+            state.tideButton  = null;
             state.showCurrent = true;
+            document.querySelectorAll('.tide-btn').forEach(b => b.classList.remove('active'));
         } else {
             state.showCurrent = !state.showCurrent;
         }
-        state.tideButton = null;
-        document.querySelectorAll('.tide-btn').forEach(b => b.classList.remove('active'));
         await refreshActiveLayers();
         updateHud();
         render();
@@ -1199,13 +1208,29 @@ function updateBlendButton() {
     const btn = ensureBlendButton();
     const col = document.getElementById('current-col');
 
-    // Always-visible when phase is non-pure and the map has tide data —
-    // even if the current layer itself is off. Clicking turns it on.
     const noMap = !state.map || NO_TIDE_MAPS.has(state.map);
-    if (noMap || state.tideButton) { btn.style.display = 'none'; return; }
+    if (noMap) { btn.style.display = 'none'; return; }
 
-    const bs = getTideBlendStates(phaseNow());
-    if (bs.w1 < 0.05 || bs.w2 < 0.05) { btn.style.display = 'none'; return; }
+    // Choose which phase the button reflects:
+    //   - no main tide pinned → the current scrub phase
+    //   - a main tide IS pinned → the SNAPSHOT phase (memory of the
+    //     intermediate position the user came from), so they can click
+    //     to switch back to it.
+    let bs;
+    if (state.tideButton) {
+        const snap = state._intermediateSnapshot;
+        if (!snap) { btn.style.display = 'none'; return; }
+        const snapDisplayMins =
+            (snap.startSeconds + snap.sliderSeconds) / 60;
+        bs = getTideBlendStates(
+            computeTidePhase(snapDisplayMins, state.highTideSeconds / 60));
+    } else {
+        bs = getTideBlendStates(phaseNow());
+    }
+    if (bs.w1 < 0.05 || bs.w2 < 0.05) {
+        btn.style.display = 'none';
+        return;
+    }
 
     const pct = Math.round(bs.w2 * 100);
     // 4-line label: stateA / ↓ / stateB / percent.
@@ -1214,7 +1239,9 @@ function updateBlendButton() {
         `<span class="blend-line blend-arrow">↓</span>` +
         `<span class="blend-line">${ABBR[bs.state2]}</span>` +
         `<span class="blend-line">${pct}%</span>`;
-    btn.classList.toggle('active', state.showCurrent);
+    // "Active" (red) only when the layer is currently visible AT this
+    // intermediate (i.e. no main tide is overriding it).
+    btn.classList.toggle('active', !state.tideButton && state.showCurrent);
     btn.style.display = '';
 
     // Insert at the correct column position based on cycle direction:
