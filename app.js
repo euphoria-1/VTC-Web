@@ -879,11 +879,24 @@ function drawArrows(ctx, grid, maxMag, kind) {
 
     let gxMin = 0, gxMax = n - 1, gyMin = 0, gyMax = n - 1;
     if (fallback) {
-        // Visible world bounds (axis-aligned, no rotation in this app).
-        const c00 = screenToWorld(0, 0);
-        const c11 = screenToWorld(view.canvasW, view.canvasH);
-        const wxMin = Math.min(c00.x, c11.x), wxMax = Math.max(c00.x, c11.x);
-        const wyMin = Math.min(c00.y, c11.y), wyMax = Math.max(c00.y, c11.y);
+        // Visible world bounds.  With course-up rotation the canvas's
+        // two diagonal corners can collapse to a near-straight line in
+        // world coords, so we MUST sample all four canvas corners and
+        // take the bbox of their world positions.
+        const corners = [
+            screenToWorld(0,               0),
+            screenToWorld(view.canvasW,    0),
+            screenToWorld(0,               view.canvasH),
+            screenToWorld(view.canvasW,    view.canvasH)
+        ];
+        let wxMin =  Infinity, wxMax = -Infinity;
+        let wyMin =  Infinity, wyMax = -Infinity;
+        for (const c of corners) {
+            if (c.x < wxMin) wxMin = c.x;
+            if (c.x > wxMax) wxMax = c.x;
+            if (c.y < wyMin) wyMin = c.y;
+            if (c.y > wyMax) wyMax = c.y;
+        }
         gxMin = Math.floor((wxMin - b.xmin) / worldDx);
         gxMax = Math.ceil ((wxMax - b.xmin) / worldDx);
         gyMin = Math.floor((wyMin - b.ymin) / worldDy);
