@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VTC Web</title>
+<style>
+    * { box-sizing: border-box; }
+    html, body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        background: #000;
+        color: #ddd;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        overflow: hidden;
+    }
+
+    #app {
+        display: flex;
+        height: 100vh;
+        width: 100vw;
+    }
+
+    /* ---------- Sidebar — full window height, buttons scale to fit ---------- */
+    #sidebar {
+        flex: 0 0 auto;
+        width: 270px;
+        background: #f5f5f5;
+        color: #222;
+        padding: 6px 8px 6px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border-right: 1px solid #c0c0c0;
+        height: 100vh;
+    }
+
+    /* Three-column grid. Map column flexes; wind/current are equal-width
+       narrow columns so the canvas gets more space. */
+    .columns {
+        display: grid;
+        grid-template-columns: 1fr 60px 60px;
+        grid-template-rows: auto 1fr;
+        column-gap: 6px;
+        flex: 1 1 0;
+        min-height: 0;
+    }
+
+    .col-header {
+        text-align: center;
+        font-weight: 700;
+        font-size: 13px;
+        padding: 4px 0 6px;
+        color: #222;
+        letter-spacing: 0.4px;
+    }
+
+    .col {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-height: 0;
+    }
+
+    .btn {
+        flex: 1 1 0;
+        min-height: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 4px 6px;
+        border: 1px solid #6aa9d8;
+        border-radius: 14px;
+        background: #6aa9d8;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 600;
+        text-align: center;
+        cursor: pointer;
+        transition: background 80ms ease, transform 60ms ease;
+        line-height: 1.1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .btn:hover { background: #5a99c8; }
+    .btn:active { transform: scale(0.98); }
+    .btn.active {
+        background: #e34a3a;
+        border-color: #e34a3a;
+    }
+    .btn.disabled {
+        background: #bbb;
+        border-color: #bbb;
+        cursor: not-allowed;
+        color: #f0f0f0;
+    }
+
+    /* Dynamic "blend" button — always visible when phase is between pure
+       states.  Label is laid out as 4 stacked lines: stateA / ↓ / stateB / %. */
+    .blend-btn {
+        font-size: 11px;
+        line-height: 1.1;
+        padding: 4px 2px;
+        white-space: normal;
+        display: flex !important;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1px;
+        text-align: center;
+    }
+    .blend-btn .blend-line { display: block; }
+    .blend-btn .blend-arrow {
+        font-size: 14px;
+        line-height: 1;
+    }
+    /* Inactive variant: shown but greyish to hint "click me to enable" */
+    .blend-btn:not(.active) {
+        background: #b6cee3;
+        border-color: #b6cee3;
+    }
+    .blend-btn:not(.active):hover {
+        background: #a3c3df;
+    }
+
+    /* ---------- Radio-style rows (Wind strength, Prestart time) ---------- */
+    .radio-panel {
+        margin-top: 6px;
+        padding: 5px 8px;
+        background: #ffffff;
+        border: 1px solid #d0d0d0;
+        border-radius: 6px;
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .radio-panel .label {
+        flex: 0 0 auto;
+        font-size: 11px;
+        color: #444;
+        letter-spacing: 0.3px;
+        font-weight: 600;
+    }
+    .radio-buttons {
+        display: flex;
+        gap: 4px;
+        flex: 1 1 0;
+        justify-content: flex-end;
+    }
+    .radio-btn {
+        min-width: 26px;
+        padding: 4px 4px;
+        border: 1px solid #6aa9d8;
+        border-radius: 10px;
+        background: #6aa9d8;
+        color: #fff;
+        font-size: 11px;
+        font-weight: 700;
+        cursor: pointer;
+        line-height: 1;
+    }
+    .radio-btn:hover { background: #5a99c8; }
+    .radio-btn.active {
+        background: #e34a3a;
+        border-color: #e34a3a;
+    }
+
+    /* ---------- Time controls (bottom of sidebar, fixed height) ---------- */
+    #time-panel {
+        margin-top: 10px;
+        padding: 8px 10px 8px;
+        background: #ffffff;
+        border: 1px solid #d0d0d0;
+        border-radius: 6px;
+        flex: 0 0 auto;
+    }
+    #time-panel h3 {
+        margin: 0 0 6px;
+        font-size: 11px;
+        color: #444;
+        letter-spacing: 0.5px;
+    }
+    .time-row {
+        display: flex;
+        align-items: center;
+        margin-bottom: 5px;
+        gap: 8px;
+    }
+    .time-row label {
+        flex: 0 0 78px;
+        font-size: 12px;
+        color: #555;
+    }
+    .time-row input.time-text {
+        flex: 1;
+        padding: 3px 5px;
+        border: 1px solid #bbb;
+        border-radius: 3px;
+        background: #fafafa;
+        color: #222;
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+    }
+    .step-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 4px;
+        margin-top: 6px;
+    }
+    .step-btn {
+        flex: 1;
+        padding: 5px 0;
+        border: 1px solid #888;
+        border-radius: 3px;
+        background: #eee;
+        color: #222;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+    }
+    .step-btn:hover { background: #ddd; }
+
+    /* ---------- Stage (canvas + slider) ---------- */
+    #stage {
+        flex: 1 1 auto;
+        position: relative;
+        background: #000;
+        overflow: hidden;
+    }
+    #map-canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+        cursor: crosshair;
+        touch-action: none;
+    }
+    #map-canvas.dragging { cursor: grabbing; }
+
+    /* Slightly lighter than fully-black for readability of overlays. */
+    #slider-wrap {
+        position: absolute;
+        top: 20px;
+        right: 14px;
+        bottom: 20px;
+        width: 64px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        background: rgba(30,30,38,0.78);
+        border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 10px;
+        padding: 8px 4px;
+        backdrop-filter: blur(4px);
+    }
+    #slider-wrap .label {
+        font-size: 10px;
+        color: #ccc;
+        text-align: center;
+        margin: 2px 0;
+        white-space: nowrap;
+    }
+    #vert-slider {
+        flex: 1;
+        margin: 4px 0;
+        writing-mode: vertical-lr;
+        direction: rtl;
+        width: 24px;
+        cursor: pointer;
+        appearance: slider-vertical;
+    }
+    #vert-slider-readout {
+        font-size: 11px;
+        color: #fff;
+        font-weight: 700;
+        margin-top: 4px;
+        font-variant-numeric: tabular-nums;
+    }
+
+    /* HUD — Day time + Race time only.  Sits to the right of the legend
+       inside #top-overlay, sized to its content. */
+    #hud {
+        background: rgba(30,30,38,0.78);
+        border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 8px;
+        padding: 6px 10px;
+        font-size: 12px;
+        color: #eee;
+        line-height: 1.35;
+        display: none;
+    }
+    #hud .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        white-space: nowrap;
+    }
+    #hud .row strong {
+        color: #fff;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+    }
+
+    /* Top-of-canvas overlay: legend on the left, HUD just to its right.
+       Both are absolutely positioned in the stage but laid out as a
+       horizontal flex row so the HUD slides over when the legend is
+       hidden. */
+    #top-overlay {
+        position: absolute;
+        top: 14px;
+        left: 14px;
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+        z-index: 5;
+        pointer-events: none;
+    }
+
+    #legend {
+        background: rgba(30,30,38,0.78);
+        border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 8px;
+        padding: 6px 8px;
+        font-size: 11px;
+        color: #eee;
+        display: none;
+    }
+    #legend h4 {
+        margin: 0 0 3px;
+        font-size: 10px;
+        letter-spacing: 0.5px;
+        color: #bbb;
+        font-weight: 700;
+    }
+    #legend .group + .group { margin-top: 4px; }
+    #legend .row {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        line-height: 1.1;
+        margin: 1px 0;
+        font-variant-numeric: tabular-nums;
+    }
+    #legend .swatch {
+        width: 12px;
+        height: 10px;
+        border-radius: 2px;
+        flex: 0 0 12px;
+        border: 1px solid rgba(255,255,255,0.2);
+    }
+    #legend .val { color: #fff; }
+
+    /* Cursor tooltip */
+    #tooltip {
+        position: fixed;
+        pointer-events: none;
+        background: rgba(30,30,38,0.92);
+        border: 1px solid rgba(255,255,255,0.18);
+        border-radius: 6px;
+        padding: 5px 8px;
+        font-size: 11px;
+        color: #fff;
+        line-height: 1.4;
+        font-variant-numeric: tabular-nums;
+        display: none;
+        z-index: 50;
+        white-space: nowrap;
+    }
+    #tooltip .lbl { color: #aaa; margin-right: 4px; }
+
+    /* Empty state */
+    #empty-msg {
+        position: absolute;
+        top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 18px;
+        color: #777;
+        pointer-events: none;
+    }
+
+    /* Error / status overlay */
+    #status {
+        position: absolute;
+        bottom: 14px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(180, 40, 40, 0.85);
+        border: 1px solid rgba(255,255,255,0.2);
+        border-radius: 6px;
+        padding: 6px 12px;
+        font-size: 12px;
+        color: #fff;
+        font-family: ui-monospace, Consolas, monospace;
+        max-width: 70%;
+        text-align: center;
+        pointer-events: none;
+        display: none;
+    }
+</style>
+</head>
+<body>
+<div id="app">
+
+    <aside id="sidebar">
+        <div class="columns">
+            <div class="col-header">Map</div>
+            <div class="col-header">Wind</div>
+            <div class="col-header">Current</div>
+
+            <!-- Map column -->
+            <div class="col" id="map-col">
+                <button class="btn map-btn" data-map="Auckland">Auckland</button>
+                <button class="btn map-btn" data-map="Wight">Isle of Wight</button>
+                <button class="btn map-btn" data-map="LaTrinite">La Trinité</button>
+                <button class="btn map-btn" data-map="Malmo">Malmö</button>
+                <button class="btn map-btn" data-map="Marseille">Marseille</button>
+                <button class="btn map-btn" data-map="Napoli">Napoli</button>
+                <button class="btn map-btn" data-map="PortoCervo">Porto Cervo</button>
+                <button class="btn map-btn" data-map="QingDao">Qing Dao</button>
+                <button class="btn map-btn" data-map="Rio">Rio de Janeiro</button>
+                <button class="btn map-btn" data-map="SanFrancisco">San Francisco</button>
+                <button class="btn map-btn" data-map="Sydney">Sydney</button>
+                <button class="btn map-btn" data-map="Trapani">Trapani</button>
+                <button class="btn map-btn" data-map="Valencia">Valencia</button>
+                <button class="btn map-btn" data-map="Vancouver">Vancouver</button>
+            </div>
+
+            <!-- Wind column -->
+            <div class="col" id="wind-col">
+                <button class="btn wind-btn" data-wind="north">N</button>
+                <button class="btn wind-btn" data-wind="north_east">NE</button>
+                <button class="btn wind-btn" data-wind="east">E</button>
+                <button class="btn wind-btn" data-wind="south_east">SE</button>
+                <button class="btn wind-btn" data-wind="south">S</button>
+                <button class="btn wind-btn" data-wind="south_west">SW</button>
+                <button class="btn wind-btn" data-wind="west">W</button>
+                <button class="btn wind-btn" data-wind="north_west">NW</button>
+            </div>
+
+            <!-- Current column -->
+            <div class="col" id="current-col">
+                <button class="btn tide-btn" data-tide="ebb">Ebb</button>
+                <button class="btn tide-btn" data-tide="low">Low</button>
+                <button class="btn tide-btn" data-tide="flood">Flood</button>
+                <button class="btn tide-btn" data-tide="high">High</button>
+            </div>
+        </div>
+
+        <div class="radio-panel" id="windforce-panel">
+            <span class="label">Wind strength</span>
+            <div class="radio-buttons">
+                <button class="radio-btn windforce-btn" data-force="F3">F3</button>
+                <button class="radio-btn windforce-btn" data-force="F4">F4</button>
+                <button class="radio-btn windforce-btn active" data-force="F5">F5</button>
+                <button class="radio-btn windforce-btn" data-force="F6">F6</button>
+                <button class="radio-btn windforce-btn" data-force="F7">F7</button>
+            </div>
+        </div>
+
+        <div class="radio-panel" id="prestart-panel">
+            <span class="label">Prestart time</span>
+            <div class="radio-buttons">
+                <button class="radio-btn prestart-btn" data-pre="0">0</button>
+                <button class="radio-btn prestart-btn" data-pre="1">1</button>
+                <button class="radio-btn prestart-btn active" data-pre="3">3</button>
+                <button class="radio-btn prestart-btn" data-pre="5">5</button>
+                <button class="radio-btn prestart-btn" data-pre="8">8</button>
+            </div>
+        </div>
+
+        <div id="time-panel">
+            <h3>TIME CONTROLS</h3>
+            <div class="time-row">
+                <label for="start-time">Race start</label>
+                <input type="text" class="time-text" id="start-time"
+                       value="12:00:00" maxlength="8"
+                       inputmode="numeric" placeholder="HH:MM:SS">
+            </div>
+            <div class="time-row">
+                <label for="high-tide-time">High tide</label>
+                <input type="text" class="time-text" id="high-tide-time"
+                       value="18:00:00" maxlength="8"
+                       inputmode="numeric" placeholder="HH:MM:SS">
+            </div>
+            <div class="step-row">
+                <button class="step-btn" id="step-minus">&minus;5 min</button>
+                <button class="step-btn" id="step-reset">Reset</button>
+                <button class="step-btn" id="step-plus">+5 min</button>
+            </div>
+        </div>
+    </aside>
+
+    <main id="stage">
+        <canvas id="map-canvas"></canvas>
+
+        <!-- Top-of-screen overlay: legend on the left, HUD just to its right. -->
+        <div id="top-overlay">
+            <div id="legend"></div>
+            <div id="hud">
+                <div class="row"><span>Day time</span><strong id="hud-time">--:--:--</strong></div>
+                <div class="row"><span>Race time</span><strong id="hud-chrono">-0:03:00</strong></div>
+            </div>
+        </div>
+
+        <div id="empty-msg">Select a map to begin</div>
+        <div id="status"></div>
+        <div id="tooltip"></div>
+
+        <div id="slider-wrap" style="display:none;">
+            <div class="label">+12h</div>
+            <input type="range" id="vert-slider" min="0" max="43200" step="1" value="0" orient="vertical">
+            <div class="label">0h</div>
+            <div id="vert-slider-readout">+0:00:00</div>
+        </div>
+    </main>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
