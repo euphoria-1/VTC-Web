@@ -7,125 +7,120 @@
 <style>
     * { box-sizing: border-box; }
     html, body {
-        height: 100%;
         margin: 0;
         padding: 0;
         background: #000;
         color: #ddd;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         overflow: hidden;
-        /* Use dynamic viewport units on touch devices so the URL bar's
-           appearance doesn't crop the layout. Falls back to vh on browsers
-           without dvh support. */
         height: 100vh;
         height: 100dvh;
     }
 
     #app {
-        display: flex;
+        position: relative;
         height: 100vh;
         height: 100dvh;
         width: 100vw;
     }
 
-    /* ---------- Sidebar — full window height, buttons scale to fit ---------- */
+    /* ---------------------------------------------------------------------
+       Floating sidebar.  Dark semi-transparent, rounded corners, sits over
+       the canvas on the left.  Canvas extends behind it.
+       --------------------------------------------------------------------- */
     #sidebar {
-        flex: 0 0 auto;
-        width: 270px;
-        background: #f5f5f5;
-        color: #222;
-        padding: 6px 8px 6px;
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        bottom: 12px;
+        width: 290px;
+        background: rgba(20,20,28,0.85);
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 12px;
+        backdrop-filter: blur(6px);
+        color: #ddd;
+        padding: 10px 12px 12px;
         display: flex;
         flex-direction: column;
         overflow: hidden;
-        border-right: 1px solid #c0c0c0;
-        height: 100vh;
-        height: 100dvh;
+        z-index: 10;
+        gap: 8px;
     }
-    /* Collapsed sidebar — fully hidden, the canvas takes the full width. */
-    #sidebar.collapsed { display: none; }
+    body.locked-mode #sidebar { display: none; }
+    body.sidebar-hidden #sidebar { display: none; }
 
-    /* Three-column grid. Map column flexes; wind/current are equal-width
-       narrow columns so the canvas gets more space. */
-    .columns {
-        display: grid;
-        grid-template-columns: 1fr 60px 60px;
-        grid-template-rows: auto 1fr;
-        column-gap: 6px;
-        flex: 1 1 0;
-        min-height: 0;
-    }
-
-    .col-header {
-        text-align: center;
+    .section { flex: 0 0 auto; }
+    .section-header {
+        text-align: left;
         font-weight: 700;
-        font-size: 13px;
-        padding: 4px 0 6px;
-        color: #222;
-        letter-spacing: 0.4px;
-        position: relative;   /* so the collapse arrow can sit at the left */
+        font-size: 10px;
+        letter-spacing: 0.8px;
+        text-transform: uppercase;
+        color: #9aa6b2;
+        padding: 0 0 4px 2px;
+        position: relative;
     }
-    /* Tiny arrow button placed inside the Map header (left edge) and
-       overlaid so it doesn't shift the centered header text. */
+
+    /* Tiny collapse arrow in the Map section's header (top-left corner). */
     #collapse-sidebar {
         position: absolute;
-        top: 50%;
-        left: 0;
-        transform: translateY(-50%);
+        top: -2px;
+        left: -4px;
         width: 18px;
         height: 18px;
         padding: 0;
         line-height: 1;
         font-size: 12px;
         font-weight: 700;
-        color: #fff;
-        background: #6aa9d8;
-        border: 1px solid #6aa9d8;
+        color: #ddd;
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.15);
         border-radius: 4px;
         cursor: pointer;
     }
-    #collapse-sidebar:hover { background: #5a99c8; }
+    #collapse-sidebar:hover { background: rgba(255,255,255,0.18); }
 
-    /* Show-sidebar button — appears on the canvas when the sidebar is
-       collapsed.  Positioned by JS just below the top-overlay so it
-       sits under whichever of legend / HUD is currently leftmost. */
-    #expand-sidebar {
-        position: absolute;
-        background: #6aa9d8;
-        border: 1px solid #6aa9d8;
-        color: #fff;
-        border-radius: 4px;
-        width: 28px;
-        height: 28px;
-        padding: 0;
-        font-size: 16px;
-        font-weight: 700;
-        line-height: 1;
-        cursor: pointer;
-        display: none;
-        z-index: 10;
+    .section-header.with-arrow { padding-left: 22px; }
+
+    /* Map section: 2 columns of 7. Fills the available vertical space. */
+    .map-section {
+        flex: 1 1 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
     }
-    #expand-sidebar:hover { background: #5a99c8; }
-
-    .col {
+    .map-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 5px;
+        flex: 1 1 0;
+        min-height: 0;
+    }
+    .map-grid .col {
         display: flex;
         flex-direction: column;
         gap: 4px;
         min-height: 0;
     }
 
+    /* Wind direction: 8 buttons in 2 rows of 4, radio behaviour. */
+    .wind-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 4px;
+    }
+
+    /* All clickable buttons inside the sidebar share a base look. */
     .btn {
-        flex: 1 1 0;
-        min-height: 0;
         display: flex;
         align-items: center;
         justify-content: center;
         padding: 4px 6px;
-        border: 1px solid #6aa9d8;
-        border-radius: 14px;
-        background: #6aa9d8;
+        border: 1px solid #4f7fa6;
+        border-radius: 12px;
+        background: #4f7fa6;
         color: #fff;
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 600;
         text-align: center;
         cursor: pointer;
@@ -135,53 +130,27 @@
         overflow: hidden;
         text-overflow: ellipsis;
     }
-    .btn:hover { background: #5a99c8; }
+    .map-grid .btn { flex: 1 1 0; min-height: 0; }
+    .wind-grid .btn { min-height: 26px; }
+
+    .btn:hover { background: #5e93b8; }
     .btn:active { transform: scale(0.98); }
     .btn.active {
         background: #e34a3a;
         border-color: #e34a3a;
     }
     .btn.disabled {
-        background: #bbb;
-        border-color: #bbb;
+        background: rgba(80,80,90,0.6);
+        border-color: rgba(120,120,130,0.4);
         cursor: not-allowed;
-        color: #f0f0f0;
-    }
-
-    /* Dynamic "blend" button — always visible when phase is between pure
-       states.  Label is laid out as 4 stacked lines: stateA / ↓ / stateB / %. */
-    .blend-btn {
-        font-size: 11px;
-        line-height: 1.1;
-        padding: 4px 2px;
-        white-space: normal;
-        display: flex !important;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 1px;
-        text-align: center;
-    }
-    .blend-btn .blend-line { display: block; }
-    .blend-btn .blend-arrow {
-        font-size: 14px;
-        line-height: 1;
-    }
-    /* Inactive variant: shown but greyish to hint "click me to enable" */
-    .blend-btn:not(.active) {
-        background: #b6cee3;
-        border-color: #b6cee3;
-    }
-    .blend-btn:not(.active):hover {
-        background: #a3c3df;
+        color: rgba(255,255,255,0.5);
     }
 
     /* ---------- Radio-style rows (Wind strength, Prestart time) ---------- */
     .radio-panel {
-        margin-top: 6px;
-        padding: 5px 8px;
-        background: #ffffff;
-        border: 1px solid #d0d0d0;
+        padding: 6px 8px;
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.08);
         border-radius: 6px;
         flex: 0 0 auto;
         display: flex;
@@ -190,10 +159,11 @@
     }
     .radio-panel .label {
         flex: 0 0 auto;
-        font-size: 11px;
-        color: #444;
-        letter-spacing: 0.3px;
-        font-weight: 600;
+        font-size: 10px;
+        letter-spacing: 0.6px;
+        text-transform: uppercase;
+        font-weight: 700;
+        color: #9aa6b2;
     }
     .radio-buttons {
         display: flex;
@@ -204,54 +174,50 @@
     .radio-btn {
         min-width: 26px;
         padding: 4px 4px;
-        border: 1px solid #6aa9d8;
+        border: 1px solid #4f7fa6;
         border-radius: 10px;
-        background: #6aa9d8;
+        background: #4f7fa6;
         color: #fff;
         font-size: 11px;
         font-weight: 700;
         cursor: pointer;
         line-height: 1;
     }
-    .radio-btn:hover { background: #5a99c8; }
+    .radio-btn:hover { background: #5e93b8; }
     .radio-btn.active {
         background: #e34a3a;
         border-color: #e34a3a;
     }
 
-    /* ---------- Time controls (bottom of sidebar, fixed height) ---------- */
+    /* ---------- Time controls ---------- */
     #time-panel {
-        margin-top: 10px;
-        padding: 8px 10px 8px;
-        background: #ffffff;
-        border: 1px solid #d0d0d0;
+        padding: 8px 10px;
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.08);
         border-radius: 6px;
         flex: 0 0 auto;
-    }
-    #time-panel h3 {
-        margin: 0 0 6px;
-        font-size: 11px;
-        color: #444;
-        letter-spacing: 0.5px;
     }
     .time-row {
         display: flex;
         align-items: center;
-        margin-bottom: 5px;
+        margin-bottom: 4px;
         gap: 8px;
     }
+    .time-row:last-child { margin-bottom: 0; }
     .time-row label {
-        flex: 0 0 78px;
-        font-size: 12px;
-        color: #555;
+        flex: 0 0 70px;
+        font-size: 11px;
+        color: #9aa6b2;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
     }
     .time-row input.time-text {
         flex: 1;
-        padding: 3px 5px;
-        border: 1px solid #bbb;
+        padding: 4px 6px;
+        border: 1px solid rgba(255,255,255,0.15);
         border-radius: 3px;
-        background: #fafafa;
-        color: #222;
+        background: rgba(0,0,0,0.4);
+        color: #fff;
         font-size: 13px;
         font-variant-numeric: tabular-nums;
     }
@@ -263,21 +229,21 @@
     }
     .step-btn {
         flex: 1;
-        padding: 5px 0;
-        border: 1px solid #888;
+        padding: 4px 0;
+        border: 1px solid rgba(255,255,255,0.2);
         border-radius: 3px;
-        background: #eee;
-        color: #222;
-        font-size: 12px;
+        background: rgba(255,255,255,0.05);
+        color: #ddd;
+        font-size: 11px;
         font-weight: 700;
         cursor: pointer;
     }
-    .step-btn:hover { background: #ddd; }
+    .step-btn:hover { background: rgba(255,255,255,0.12); }
 
-    /* ---------- Stage (canvas + slider) ---------- */
+    /* ---------- Stage (canvas + slider + overlays) ---------- */
     #stage {
-        flex: 1 1 auto;
-        position: relative;
+        position: absolute;
+        inset: 0;
         background: #000;
         overflow: hidden;
     }
@@ -292,88 +258,166 @@
     }
     #map-canvas.dragging { cursor: grabbing; }
 
-    /* Slightly lighter than fully-black for readability of overlays. */
+    /* ---------- Vertical slider with tide markers ---------- */
     #slider-wrap {
         position: absolute;
-        top: 20px;
+        top: 14px;
         right: 14px;
-        bottom: 20px;
-        width: 64px;
-        display: flex;
+        bottom: 14px;
+        width: 110px;
+        display: none;
         flex-direction: column;
-        align-items: center;
-        background: rgba(30,30,38,0.78);
-        border: 1px solid rgba(255,255,255,0.15);
+        align-items: stretch;
+        background: rgba(20,20,28,0.85);
+        border: 1px solid rgba(255,255,255,0.12);
         border-radius: 10px;
-        padding: 8px 4px;
-        backdrop-filter: blur(4px);
+        padding: 8px 6px 8px 10px;
+        backdrop-filter: blur(6px);
+        z-index: 5;
     }
-    #slider-wrap .label {
+    #slider-wrap.visible { display: flex; }
+
+    #slider-wrap .slider-title {
         font-size: 10px;
-        color: #ccc;
-        text-align: center;
-        margin: 2px 0;
+        letter-spacing: 0.6px;
+        color: #9aa6b2;
+        text-transform: uppercase;
+        text-align: right;
+        margin: 0 0 2px;
+    }
+    #slider-wrap .slider-subtitle {
+        font-size: 9px;
+        color: #6b7785;
+        text-align: right;
+        margin-bottom: 6px;
+    }
+
+    /* The slider body holds the tide-marker labels on the left and the
+       native range input on the right, sharing the same vertical extent. */
+    .slider-body {
+        flex: 1 1 0;
+        position: relative;
+        display: flex;
+        min-height: 0;
+    }
+    .tide-markers-col {
+        flex: 1 1 0;
+        position: relative;     /* anchor for absolutely-positioned markers */
+        padding-right: 4px;
+    }
+    .tide-marker {
+        position: absolute;
+        right: 0;
+        transform: translateY(50%);
+        text-align: right;
+        line-height: 1.05;
         white-space: nowrap;
     }
+    .tide-marker .tide-name {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.6px;
+        color: #fff;
+        display: block;
+    }
+    .tide-marker .tide-time {
+        font-size: 9px;
+        color: #9aa6b2;
+        font-variant-numeric: tabular-nums;
+        display: block;
+    }
+
+    .slider-track-area {
+        flex: 0 0 26px;
+        display: flex;
+        align-items: stretch;
+        justify-content: center;
+    }
     #vert-slider {
-        flex: 1;
-        margin: 4px 0;
+        flex: 1 1 0;
+        width: 26px;
         writing-mode: vertical-lr;
         direction: rtl;
-        width: 24px;
         cursor: pointer;
         appearance: slider-vertical;
+        margin: 0;
     }
+
     #vert-slider-readout {
         font-size: 11px;
         color: #fff;
         font-weight: 700;
-        margin-top: 4px;
+        margin-top: 6px;
         font-variant-numeric: tabular-nums;
+        text-align: right;
     }
 
-    /* HUD — Day time + Race time only.  Sits to the right of the legend
-       inside #top-overlay, sized to its content. */
-    #hud {
-        background: rgba(30,30,38,0.78);
-        border: 1px solid rgba(255,255,255,0.15);
-        border-radius: 8px;
-        padding: 6px 10px;
-        font-size: 12px;
-        color: #eee;
-        line-height: 1.35;
+    /* ---------- Bottom-left toggles (ALWAYS visible when a map is loaded) ----- */
+    #lock-toggles {
+        position: absolute;
+        bottom: 16px;
+        left: 16px;
         display: none;
+        gap: 8px;
+        z-index: 6;
     }
-    #hud .row {
-        display: flex;
-        justify-content: space-between;
-        gap: 12px;
-        white-space: nowrap;
-    }
-    #hud .row strong {
+    #lock-toggles.visible { display: flex; }
+    .lock-btn {
+        padding: 6px 14px;
+        border: 1px solid #4f7fa6;
+        border-radius: 14px;
+        background: #4f7fa6;
         color: #fff;
+        font-size: 12px;
         font-weight: 600;
-        font-variant-numeric: tabular-nums;
+        cursor: pointer;
+        min-width: 70px;
+    }
+    .lock-btn:hover { background: #5e93b8; }
+    .lock-btn.active {
+        background: #e34a3a;
+        border-color: #e34a3a;
     }
 
-    /* Top-of-canvas overlay: legend on the left, HUD just to its right.
-       Both are absolutely positioned in the stage but laid out as a
-       horizontal flex row so the HUD slides over when the legend is
-       hidden. */
+    /* ---------- Show-sidebar button (when default-mode sidebar collapsed) ---- */
+    #expand-sidebar {
+        position: absolute;
+        top: 16px;
+        left: 16px;
+        background: rgba(20,20,28,0.85);
+        border: 1px solid rgba(255,255,255,0.18);
+        color: #fff;
+        border-radius: 6px;
+        width: 30px;
+        height: 30px;
+        padding: 0;
+        font-size: 14px;
+        font-weight: 700;
+        line-height: 1;
+        cursor: pointer;
+        display: none;
+        z-index: 11;
+    }
+    body.sidebar-hidden #expand-sidebar { display: block; }
+    body.locked-mode #expand-sidebar { display: none !important; }
+
+    /* ---------- Top-of-canvas HUD + legend overlay ---------- */
     #top-overlay {
         position: absolute;
         top: 14px;
-        left: 14px;
+        left: 314px;     /* clear the sidebar on the left */
         display: flex;
         gap: 10px;
         align-items: flex-start;
         z-index: 5;
         pointer-events: none;
     }
+    body.locked-mode #top-overlay,
+    body.sidebar-hidden #top-overlay { left: 14px; }
 
     #legend {
-        background: rgba(30,30,38,0.78);
-        border: 1px solid rgba(255,255,255,0.15);
+        background: rgba(20,20,28,0.85);
+        border: 1px solid rgba(255,255,255,0.12);
         border-radius: 8px;
         padding: 6px 8px;
         font-size: 11px;
@@ -384,7 +428,7 @@
         margin: 0 0 3px;
         font-size: 10px;
         letter-spacing: 0.5px;
-        color: #bbb;
+        color: #9aa6b2;
         font-weight: 700;
     }
     #legend .group + .group { margin-top: 4px; }
@@ -405,46 +449,35 @@
     }
     #legend .val { color: #fff; }
 
-    /* Locked-mode overlay buttons (shown when a course was loaded via
-       URL — the sidebar is fully hidden and only these two toggles +
-       the slider remain interactive). */
-    #lock-toggles {
-        position: absolute;
-        bottom: 14px;
-        left: 14px;
-        display: none;
-        gap: 8px;
-        z-index: 6;
-    }
-    body.locked-mode #lock-toggles { display: flex; }
-    body.locked-mode #sidebar      { display: none; }
-    body.locked-mode #expand-sidebar { display: none !important; }
-    .lock-btn {
-        padding: 6px 12px;
-        border: 1px solid #6aa9d8;
-        border-radius: 14px;
-        background: #6aa9d8;
-        color: #fff;
+    #hud {
+        background: rgba(20,20,28,0.85);
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 8px;
+        padding: 6px 10px;
         font-size: 12px;
-        font-weight: 600;
-        cursor: pointer;
-        min-width: 60px;
+        color: #eee;
+        line-height: 1.35;
+        display: none;
     }
-    .lock-btn:hover { background: #5a99c8; }
-    .lock-btn.active {
-        background: #e34a3a;
-        border-color: #e34a3a;
+    #hud .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        white-space: nowrap;
+    }
+    #hud .row strong {
+        color: #fff;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
     }
 
-    /* Tidal-phase indicator (top-right of canvas, to the left of the
-       slider).  Shows the two tides currently being blended and the
-       weighting between them, styled like a sailing-instrument readout. */
+    /* ---------- Tidal-phase indicator (left side of canvas, below HUD) ----- */
     #blend-indicator {
         position: absolute;
         top: 14px;
-        right: 90px;        /* leaves room for the vertical slider */
+        right: 134px;     /* clear the slider on the right */
         background: rgba(20,20,28,0.85);
-        border: 1px solid rgba(255,255,255,0.18);
+        border: 1px solid rgba(255,255,255,0.12);
         border-radius: 8px;
         padding: 8px 12px 6px;
         min-width: 180px;
@@ -453,6 +486,7 @@
         font-size: 12px;
         font-variant-numeric: tabular-nums;
         display: none;
+        z-index: 5;
     }
     #blend-indicator .bar {
         position: relative;
@@ -493,9 +527,7 @@
         margin: 0 4px;
     }
 
-    /* Touch-device crosshair: a fixed "+" at the centre of the canvas
-       used as the tooltip sample point when there's no hover. Hidden on
-       mouse-primary devices via the `.touch-mode` body class set by JS. */
+    /* Touch-device crosshair */
     #crosshair {
         position: absolute;
         top: 50%;
@@ -514,14 +546,8 @@
         background: rgba(255,255,255,0.85);
         box-shadow: 0 0 4px rgba(0,0,0,0.9);
     }
-    #crosshair::before {  /* horizontal */
-        left: 0; right: 0; top: 50%;
-        height: 2px; margin-top: -1px;
-    }
-    #crosshair::after {   /* vertical */
-        top: 0; bottom: 0; left: 50%;
-        width: 2px; margin-left: -1px;
-    }
+    #crosshair::before { left: 0; right: 0; top: 50%; height: 2px; margin-top: -1px; }
+    #crosshair::after  { top: 0; bottom: 0; left: 50%; width: 2px; margin-left: -1px; }
     body.touch-mode #crosshair { display: block; }
     body.touch-mode #map-canvas { cursor: default; }
 
@@ -529,7 +555,7 @@
     #tooltip {
         position: fixed;
         pointer-events: none;
-        background: rgba(30,30,38,0.92);
+        background: rgba(20,20,28,0.92);
         border: 1px solid rgba(255,255,255,0.18);
         border-radius: 6px;
         padding: 5px 8px;
@@ -541,19 +567,17 @@
         z-index: 50;
         white-space: nowrap;
     }
-    #tooltip .lbl { color: #aaa; margin-right: 4px; }
+    #tooltip .lbl { color: #9aa6b2; margin-right: 4px; }
 
-    /* Empty state */
+    /* Empty / status messages */
     #empty-msg {
         position: absolute;
         top: 50%; left: 50%;
         transform: translate(-50%, -50%);
         font-size: 18px;
-        color: #777;
+        color: #555;
         pointer-events: none;
     }
-
-    /* Error / status overlay */
     #status {
         position: absolute;
         bottom: 14px;
@@ -576,35 +600,91 @@
 <body>
 <div id="app">
 
+    <main id="stage">
+        <canvas id="map-canvas"></canvas>
+
+        <!-- Top-of-screen overlay: legend + HUD (Day time / Race time). -->
+        <div id="top-overlay">
+            <div id="legend"></div>
+            <div id="hud">
+                <div class="row"><span>Day time</span><strong id="hud-time">--:--:--</strong></div>
+                <div class="row"><span>Race time</span><strong id="hud-chrono">+0:00:00</strong></div>
+            </div>
+        </div>
+
+        <div id="empty-msg">Select a map to begin</div>
+        <div id="status"></div>
+        <div id="tooltip"></div>
+        <div id="crosshair"></div>
+        <button id="expand-sidebar" title="Show menu">&#9776;</button>
+
+        <!-- Bottom-left layer toggles (always visible once a map is picked) -->
+        <div id="lock-toggles">
+            <button class="lock-btn" id="lock-wind-btn">Wind</button>
+            <button class="lock-btn" id="lock-current-btn">Current</button>
+        </div>
+
+        <!-- Tidal-phase indicator -->
+        <div id="blend-indicator">
+            <div class="bar"><div class="fill" id="blend-fill"></div></div>
+            <div class="pcts">
+                <span id="blend-pct-left">0%</span>
+                <span id="blend-pct-right">100%</span>
+            </div>
+            <div class="lbls">
+                <span><span class="dot"></span><span id="blend-lbl-left">EBB</span></span>
+                <span><span id="blend-lbl-right">LOW</span><span class="dot"></span></span>
+            </div>
+        </div>
+
+        <!-- Right-side vertical slider with tide markers (visible once a map is picked). -->
+        <div id="slider-wrap">
+            <div class="slider-title" id="slider-top-label">+12h</div>
+            <div class="slider-body">
+                <div class="tide-markers-col" id="tide-markers"></div>
+                <div class="slider-track-area">
+                    <input type="range" id="vert-slider"
+                           min="0" max="43200" step="1" value="0" orient="vertical">
+                </div>
+            </div>
+            <div id="vert-slider-readout">+0:00:00</div>
+        </div>
+
+    </main>
+
     <aside id="sidebar">
-        <div class="columns">
-            <div class="col-header">
+        <!-- Maps: 2 columns of 7 -->
+        <div class="section map-section">
+            <div class="section-header with-arrow">
                 <button id="collapse-sidebar" title="Hide menu">&#9664;</button>
                 Map
             </div>
-            <div class="col-header">Wind</div>
-            <div class="col-header">Current</div>
-
-            <!-- Map column -->
-            <div class="col" id="map-col">
-                <button class="btn map-btn" data-map="Auckland">Auckland</button>
-                <button class="btn map-btn" data-map="Wight">Isle of Wight</button>
-                <button class="btn map-btn" data-map="LaTrinite">La Trinité</button>
-                <button class="btn map-btn" data-map="Malmo">Malmö</button>
-                <button class="btn map-btn" data-map="Marseille">Marseille</button>
-                <button class="btn map-btn" data-map="Napoli">Napoli</button>
-                <button class="btn map-btn" data-map="PortoCervo">Porto Cervo</button>
-                <button class="btn map-btn" data-map="QingDao">Qing Dao</button>
-                <button class="btn map-btn" data-map="Rio">Rio de Janeiro</button>
-                <button class="btn map-btn" data-map="SanFrancisco">San Francisco</button>
-                <button class="btn map-btn" data-map="Sydney">Sydney</button>
-                <button class="btn map-btn" data-map="Trapani">Trapani</button>
-                <button class="btn map-btn" data-map="Valencia">Valencia</button>
-                <button class="btn map-btn" data-map="Vancouver">Vancouver</button>
+            <div class="map-grid">
+                <div class="col">
+                    <button class="btn map-btn" data-map="Auckland">Auckland</button>
+                    <button class="btn map-btn" data-map="Wight">Isle of Wight</button>
+                    <button class="btn map-btn" data-map="LaTrinite">La Trinité</button>
+                    <button class="btn map-btn" data-map="Malmo">Malmö</button>
+                    <button class="btn map-btn" data-map="Marseille">Marseille</button>
+                    <button class="btn map-btn" data-map="Napoli">Napoli</button>
+                    <button class="btn map-btn" data-map="PortoCervo">Porto Cervo</button>
+                </div>
+                <div class="col">
+                    <button class="btn map-btn" data-map="QingDao">Qing Dao</button>
+                    <button class="btn map-btn" data-map="Rio">Rio de Janeiro</button>
+                    <button class="btn map-btn" data-map="SanFrancisco">San Francisco</button>
+                    <button class="btn map-btn" data-map="Sydney">Sydney</button>
+                    <button class="btn map-btn" data-map="Trapani">Trapani</button>
+                    <button class="btn map-btn" data-map="Valencia">Valencia</button>
+                    <button class="btn map-btn" data-map="Vancouver">Vancouver</button>
+                </div>
             </div>
+        </div>
 
-            <!-- Wind column -->
-            <div class="col" id="wind-col">
+        <!-- Wind direction (radio).  The bottom-left toggle handles on/off. -->
+        <div class="section">
+            <div class="section-header">Wind direction</div>
+            <div class="wind-grid">
                 <button class="btn wind-btn" data-wind="north">N</button>
                 <button class="btn wind-btn" data-wind="north_east">NE</button>
                 <button class="btn wind-btn" data-wind="east">E</button>
@@ -613,16 +693,6 @@
                 <button class="btn wind-btn" data-wind="south_west">SW</button>
                 <button class="btn wind-btn" data-wind="west">W</button>
                 <button class="btn wind-btn" data-wind="north_west">NW</button>
-            </div>
-
-            <!-- Current column — ordered TOP→BOTTOM so phase progression
-                 moves UPWARD with the right-side slider: Ebb above High
-                 above Flood above Low. -->
-            <div class="col" id="current-col">
-                <button class="btn tide-btn" data-tide="ebb">Ebb</button>
-                <button class="btn tide-btn" data-tide="high">High</button>
-                <button class="btn tide-btn" data-tide="flood">Flood</button>
-                <button class="btn tide-btn" data-tide="low">Low</button>
             </div>
         </div>
 
@@ -638,7 +708,7 @@
         </div>
 
         <div class="radio-panel" id="prestart-panel">
-            <span class="label">Prestart time</span>
+            <span class="label">Prestart</span>
             <div class="radio-buttons">
                 <button class="radio-btn prestart-btn" data-pre="0">0</button>
                 <button class="radio-btn prestart-btn" data-pre="1">1</button>
@@ -649,7 +719,6 @@
         </div>
 
         <div id="time-panel">
-            <h3>TIME CONTROLS</h3>
             <div class="time-row">
                 <label for="start-time">Race start</label>
                 <input type="text" class="time-text" id="start-time"
@@ -669,51 +738,6 @@
             </div>
         </div>
     </aside>
-
-    <main id="stage">
-        <canvas id="map-canvas"></canvas>
-
-        <!-- Top-of-screen overlay: legend on the left, HUD just to its right. -->
-        <div id="top-overlay">
-            <div id="legend"></div>
-            <div id="hud">
-                <div class="row"><span>Day time</span><strong id="hud-time">--:--:--</strong></div>
-                <div class="row"><span>Race time</span><strong id="hud-chrono">-0:03:00</strong></div>
-            </div>
-        </div>
-
-        <div id="empty-msg">Select a map to begin</div>
-        <div id="status"></div>
-        <div id="tooltip"></div>
-        <div id="crosshair"></div>
-        <button id="expand-sidebar" title="Show menu">&#9654;</button>
-
-        <!-- Locked-mode overlay (shown only when ?code= delivers a course) -->
-        <div id="lock-toggles">
-            <button class="lock-btn" id="lock-wind-btn">Wind</button>
-            <button class="lock-btn" id="lock-current-btn">Current</button>
-        </div>
-
-        <!-- Tidal-phase indicator (shown when a course is loaded) -->
-        <div id="blend-indicator">
-            <div class="bar"><div class="fill" id="blend-fill"></div></div>
-            <div class="pcts">
-                <span id="blend-pct-left">0%</span>
-                <span id="blend-pct-right">100%</span>
-            </div>
-            <div class="lbls">
-                <span><span class="dot"></span><span id="blend-lbl-left">EBB</span></span>
-                <span><span id="blend-lbl-right">LOW</span><span class="dot"></span></span>
-            </div>
-        </div>
-
-        <div id="slider-wrap" style="display:none;">
-            <div class="label" id="slider-top-label">+12h</div>
-            <input type="range" id="vert-slider" min="0" max="43200" step="1" value="0" orient="vertical">
-            <div class="label">0h</div>
-            <div id="vert-slider-readout">+0:00:00</div>
-        </div>
-    </main>
 
 </div>
 

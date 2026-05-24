@@ -845,14 +845,9 @@ function drawCourse(ctx) {
     }
 }
 
-function positionExpandButton() {
-    const btn = document.getElementById('expand-sidebar');
-    if (!btn || btn.style.display === 'none') return;
-    const overlay = document.getElementById('top-overlay');
-    const rect = overlay.getBoundingClientRect();
-    btn.style.top  = (rect.bottom + 8) + 'px';
-    btn.style.left = (rect.left) + 'px';
-}
+// Stub — the expand-sidebar button is now CSS-positioned at a fixed
+// top-left location.  Kept so callers don't break.
+function positionExpandButton() {}
 
 function drawArrows(ctx, grid, maxMag, kind) {
     const n = state.gridSize;
@@ -1055,18 +1050,17 @@ async function selectMap(mapName) {
     });
     document.getElementById('empty-msg').style.display = 'none';
     document.getElementById('hud').style.display = 'block';
-    document.getElementById('slider-wrap').style.display = 'flex';
+    document.getElementById('slider-wrap').classList.add('visible');
+    document.getElementById('lock-toggles').classList.add('visible');
 
-    const noTide = NO_TIDE_MAPS.has(mapName);
-    document.querySelectorAll('.tide-btn').forEach(b => {
-        b.classList.toggle('disabled', noTide);
-        b.disabled = noTide;
-    });
-    if (noTide) {
+    if (NO_TIDE_MAPS.has(mapName)) {
         state.showCurrent = false;
-        state.tideButton = null;
-        document.querySelectorAll('.tide-btn').forEach(b => b.classList.remove('active'));
+        state.tideButton  = null;
     }
+    // Disable the bottom-left "Current" toggle for maps without tide data.
+    const cbtn = document.getElementById('lock-current-btn');
+    cbtn.disabled = NO_TIDE_MAPS.has(mapName);
+    cbtn.classList.toggle('disabled', NO_TIDE_MAPS.has(mapName));
 
     try {
         await loadLandImage(mapName);
@@ -1246,117 +1240,49 @@ function updateHud() {
     // Day time: full HH:MM:SS clock for race start + slider, modulo 24h.
     document.getElementById('hud-time').textContent = secsToHHMMSS(dayTimeSeconds());
 
-    updateBlendButton();
     updateLegend();
     updateBlendIndicator();
-}
-
-// -------------------------------------------------------------------------
-// Dynamic "blend" button — shown in the Current column when the current
-// layer is on but no fixed tide button is pinned (user is scrubbing time).
-// Its label matches the HUD blend description, e.g. "Flood → High (9%)".
-// Clicking it toggles current off.
-// -------------------------------------------------------------------------
-
-let _blendBtn = null;
-function ensureBlendButton() {
-    if (_blendBtn) return _blendBtn;
-    _blendBtn = document.createElement('button');
-    _blendBtn.id = 'blend-btn';
-    _blendBtn.className = 'btn tide-btn blend-btn';
-    _blendBtn.style.display = 'none';
-    _blendBtn.addEventListener('click', async () => {
-        // Two modes, depending on whether a main tide is currently pinned:
-        //
-        //   (A) A main tide IS pinned (slider snapped to 0 = pure tide).
-        //       The intermediate button is showing the SNAPSHOT phase.
-        //       Click → "switch to intermediate": restore the snapshot,
-        //       unpin, turn the layer on, clear the snapshot.
-        //
-        //   (B) No main tide pinned (slider is already at an intermediate
-        //       phase, blend button reflects the CURRENT phase).
-        //       Click → just toggle showCurrent on / off.  Slider stays
-        //       put; snapshot is left alone.
-        if (state.tideButton) {
-            const snap = state._intermediateSnapshot;
-            if (snap) {
-                state.startSeconds  = snap.startSeconds;
-                state.sliderSeconds = snap.sliderSeconds;
-                document.getElementById('start-time').value  = secsToHHMMSS(snap.startSeconds);
-                document.getElementById('vert-slider').value = snap.sliderSeconds;
-                state._intermediateSnapshot = null;
-            }
-            state.tideButton  = null;
-            state.showCurrent = true;
-            document.querySelectorAll('.tide-btn').forEach(b => b.classList.remove('active'));
-        } else {
-            state.showCurrent = !state.showCurrent;
-        }
-        await refreshActiveLayers();
-        updateHud();
-        render();
-    });
-    return _blendBtn;
+    updateTideMarkers();
 }
 
 const ABBR = { ebb: 'Ebb', low: 'Low', flood: 'Flood', high: 'High' };
 
-function updateBlendButton() {
-    const btn = ensureBlendButton();
-    const col = document.getElementById('current-col');
+// -------------------------------------------------------------------------
+// Tide markers on the right-side slider.  Replaces the old sidebar "tide"
+// column: each of the 4 main tides gets a dot + label positioned along
+// the slider track at the slider value where that tide actually falls
+// (relative to race start).  Positions shift as the user changes race
+// start / high tide; markers outside the slider's [0, MAX] range are
+// hidden (so locked-mode's 1-hour window typically shows none or one).
+// -------------------------------------------------------------------------
+const TIDE_NAMES = ['ebb', 'low', 'flood', 'high'];
 
-    const noMap = !state.map || NO_TIDE_MAPS.has(state.map);
-    if (noMap) { btn.style.display = 'none'; return; }
+function updateTideMarkers() {
+    const host = document.getElementById('tide-markers');
+    if (!host) return;
+    // Clear & rebuild.  4 markers max, so the cost is negligible.
+    host.innerHTML = '';
+    if (!state.map || NO_TIDE_MAPS.has(state.map)) return;
 
-    // Choose which phase the button reflects:
-    //   - no main tide pinned → the current scrub phase
-    //   - a main tide IS pinned → the SNAPSHOT phase (memory of the
-    //     intermediate position the user came from), so they can click
-    //     to switch back to it.
-    let bs;
-    if (state.tideButton) {
-        const snap = state._intermediateSnapshot;
-        if (!snap) { btn.style.display = 'none'; return; }
-        const snapDisplayMins =
-            (snap.startSeconds + snap.sliderSeconds) / 60;
-        bs = getTideBlendStates(
-            computeTidePhase(snapDisplayMins, state.highTideSeconds / 60));
-    } else {
-        bs = getTideBlendStates(phaseNow());
+    const dayCycle = 86400;
+    for (const name of TIDE_NAMES) {
+        const offsetHrs = TIDE_HOUR_OFFSETS[name];          // -9,-6,-3,0
+        const tideTime  = ((state.highTideSeconds + offsetHrs * 3600) % dayCycle + dayCycle) % dayCycle;
+        let secs = ((tideTime - state.startSeconds) % 43200 + 43200) % 43200;
+        if (secs > SLIDER_MAX_SEC) continue;                 // outside slider range
+
+        const pctFromBottom = (secs / SLIDER_MAX_SEC) * 100;
+        const hh = Math.floor(secs / 3600);
+        const mm = Math.floor((secs % 3600) / 60);
+
+        const el = document.createElement('div');
+        el.className = 'tide-marker';
+        el.style.bottom = pctFromBottom + '%';
+        el.innerHTML =
+            `<span class="tide-name">${name.toUpperCase()}</span>` +
+            `<span class="tide-time">+${hh}:${String(mm).padStart(2, '0')}</span>`;
+        host.appendChild(el);
     }
-    if (bs.w1 < 0.05 || bs.w2 < 0.05) {
-        btn.style.display = 'none';
-        return;
-    }
-
-    const pct = Math.round(bs.w2 * 100);
-    // 4-line label: stateB (destination, above) / ↑ / stateA (origin,
-    // below) / percent.  Matches the new column order where phase
-    // progresses upward with the right-side slider.
-    btn.innerHTML =
-        `<span class="blend-line">${ABBR[bs.state2]}</span>` +
-        `<span class="blend-line blend-arrow">↑</span>` +
-        `<span class="blend-line">${ABBR[bs.state1]}</span>` +
-        `<span class="blend-line">${pct}%</span>`;
-    // "Active" (red) only when the layer is currently visible AT this
-    // intermediate (i.e. no main tide is overriding it).
-    btn.classList.toggle('active', !state.tideButton && state.showCurrent);
-    btn.style.display = '';
-
-    // Insert ABOVE the relevant tide button (column order top→bottom:
-    // Ebb, High, Flood, Low — phase rises upward through the column):
-    //   low → flood  : above Low     (= insertBefore Low)
-    //   flood → high : above Flood   (= insertBefore Flood)
-    //   high → ebb   : above High    (= insertBefore High)
-    //   ebb → low    : above Ebb     (= insertBefore Ebb, top of column)
-    const ref = {
-        'low|flood':  col.querySelector('[data-tide="low"]'),
-        'flood|high': col.querySelector('[data-tide="flood"]'),
-        'high|ebb':   col.querySelector('[data-tide="high"]'),
-        'ebb|low':    col.querySelector('[data-tide="ebb"]')
-    }[bs.state1 + '|' + bs.state2];
-
-    if (ref && btn.nextSibling !== ref) col.insertBefore(btn, ref);
 }
 
 // -------------------------------------------------------------------------
@@ -1392,8 +1318,12 @@ function refreshLockToggles() {
     if (cbtn) cbtn.classList.toggle('active', state.showCurrent);
 }
 
+// Bottom-left toggles are now active in BOTH default and locked mode;
+// they're shown whenever a map is loaded.  In default mode the sidebar
+// is also visible and provides the radio buttons for picking a wind
+// direction / force / etc.; the toggle just controls layer visibility.
 document.getElementById('lock-wind-btn').addEventListener('click', async () => {
-    if (!state.locked) return;
+    if (!state.map) return;
     state.wind = state.wind ? null : (state._lockedWind || 'north');
     document.querySelectorAll('.wind-btn').forEach(b => {
         b.classList.toggle('active', b.dataset.wind === state.wind);
@@ -1405,10 +1335,9 @@ document.getElementById('lock-wind-btn').addEventListener('click', async () => {
 });
 
 document.getElementById('lock-current-btn').addEventListener('click', async () => {
-    if (!state.locked) return;
+    if (!state.map || NO_TIDE_MAPS.has(state.map)) return;
     state.showCurrent = !state.showCurrent;
     state.tideButton = null;
-    document.querySelectorAll('.tide-btn').forEach(b => b.classList.remove('active'));
     await refreshActiveLayers();
     refreshLockToggles();
     updateHud();
@@ -1416,11 +1345,11 @@ document.getElementById('lock-current-btn').addEventListener('click', async () =
 });
 
 // Tidal-phase indicator: shows current blend weighting (e.g. EBB 30% | LOW 70%)
-// in the top-right of the canvas whenever a course is loaded.
+// in the top of the canvas whenever a map (with tide data) is loaded.
 function updateBlendIndicator() {
     const root = document.getElementById('blend-indicator');
     if (!root) return;
-    if (!state.locked || !state.map) {
+    if (!state.map || NO_TIDE_MAPS.has(state.map)) {
         root.style.display = 'none';
         return;
     }
@@ -1446,74 +1375,28 @@ document.querySelectorAll('.map-btn').forEach(btn => {
     });
 });
 
+// Wind direction is now a true radio: clicking always selects that
+// direction (no toggle-off via same-click).  The bottom-left "Wind"
+// button handles layer on/off.
 document.querySelectorAll('.wind-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
         if (!state.map) return;
-        const dir = btn.dataset.wind;
-        state.wind = (state.wind === dir) ? null : dir;
+        state.wind = btn.dataset.wind;
+        state._lockedWind = state.wind;       // remember as last-selected
         document.querySelectorAll('.wind-btn').forEach(b => {
             b.classList.toggle('active', b.dataset.wind === state.wind);
         });
         await refreshActiveLayers();
+        refreshLockToggles();
         updateHud();
         render();
     });
 });
 
-// True toggle: 1st click pins + sets race start; same-button click again
-// turns current off.  Clicking a different tide button switches.
-document.querySelectorAll('.tide-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-        if (!state.map || NO_TIDE_MAPS.has(state.map)) return;
-        const t = btn.dataset.tide;
-
-        if (state.tideButton === t) {
-            // Second click on the SAME active tide button → turn off.
-            // We also restore the slider/start to the intermediate
-            // position (if any) so the intermediate button stays visible
-            // and the user can return to it without losing context.
-            const snap = state._intermediateSnapshot;
-            if (snap) {
-                state.startSeconds  = snap.startSeconds;
-                state.sliderSeconds = snap.sliderSeconds;
-                document.getElementById('start-time').value  = secsToHHMMSS(snap.startSeconds);
-                document.getElementById('vert-slider').value = snap.sliderSeconds;
-                // Keep the snapshot — the user may click the
-                // intermediate button next to come back.
-            }
-            state.tideButton = null;
-            state.showCurrent = false;
-        } else {
-            // Pinning a (new) main tide.  If we're coming from a non-
-            // pinned state, the current slider/start IS the user's
-            // intermediate position — capture it.  When switching
-            // between mains (was already pinned) the snapshot stays.
-            if (state.tideButton === null) {
-                state._intermediateSnapshot = {
-                    startSeconds:  state.startSeconds,
-                    sliderSeconds: state.sliderSeconds
-                };
-            }
-            state.tideButton = t;
-            state.showCurrent = true;
-            // Move race start so the displayed (slider = 0) moment IS this
-            // tide.  Offsets in hours: Ebb=-9, Low=-6, Flood=-3, High=0.
-            // If the result lands outside 07:00–19:00 we add 12 h.
-            const ns = applyTideOffset(state.highTideSeconds, TIDE_HOUR_OFFSETS[t]);
-            state.startSeconds = ns;
-            document.getElementById('start-time').value = secsToHHMMSS(ns);
-            state.sliderSeconds = 0;
-            document.getElementById('vert-slider').value = 0;
-        }
-
-        document.querySelectorAll('.tide-btn').forEach(b => {
-            b.classList.toggle('active', b.dataset.tide === state.tideButton);
-        });
-        await refreshActiveLayers();
-        updateHud();
-        render();
-    });
-});
+// Tide column was removed in the redesign — the 4 main tides are now
+// visualised as markers on the right-side slider (see updateTideMarkers).
+// state.tideButton stays in the state object for backward compatibility
+// with code paths that read it, but it's no longer settable from the UI.
 
 // -------------------------------------------------------------------------
 // UI wiring — time inputs
@@ -1562,16 +1445,13 @@ const expandBtnEl     = document.getElementById('expand-sidebar');
 
 collapseBtnEl.addEventListener('click', e => {
     e.stopPropagation();
-    sidebarEl.classList.add('collapsed');
-    expandBtnEl.style.display = 'block';
-    // Canvas dimensions just changed → refit / re-render.
+    document.body.classList.add('sidebar-hidden');
     fitView();
     render();
 });
 
 expandBtnEl.addEventListener('click', () => {
-    sidebarEl.classList.remove('collapsed');
-    expandBtnEl.style.display = 'none';
+    document.body.classList.remove('sidebar-hidden');
     fitView();
     render();
 });
@@ -1601,14 +1481,11 @@ document.querySelectorAll('.prestart-btn').forEach(btn => {
     });
 });
 
-// ±5 min / Reset step buttons advance the slider value.  Using the slider
-// implicitly "unpins" the tide button (the displayed state may diverge
-// from a pure-state moment).
+// No-op shim: kept so existing call-sites (stepSlider, slider drag) still
+// compile.  In the redesign there's no "tide button" to unpin — the slider
+// itself drives which blend is shown via updateTideMarkers().
 function unpinTide() {
-    if (state.tideButton) {
-        state.tideButton = null;
-        document.querySelectorAll('.tide-btn').forEach(b => b.classList.remove('active'));
-    }
+    state.tideButton = null;
 }
 // Internal step is in SECONDS. The "5 min" buttons add/subtract 300.
 // SLIDER_MAX_SEC defaults to 12 h (no course); when a course is loaded
@@ -2032,16 +1909,10 @@ window.addEventListener('resize', () => {
 
     if (p('map') && MAPS[p('map')]) {
         if (p('wind')) state.wind = p('wind');
-        if (p('tide')) {
-            state.tideButton = p('tide');
-            state.showCurrent = true;
-        }
+        if (p('tide')) state.showCurrent = true;       // legacy: turn current on
         await selectMap(p('map'));
         document.querySelectorAll('.wind-btn').forEach(b => {
             b.classList.toggle('active', b.dataset.wind === state.wind);
-        });
-        document.querySelectorAll('.tide-btn').forEach(b => {
-            b.classList.toggle('active', b.dataset.tide === state.tideButton);
         });
         // Capture the URL-supplied wind direction now that state.wind
         // is populated, and highlight the bottom-left "Wind" toggle.
