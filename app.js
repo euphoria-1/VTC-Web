@@ -1449,17 +1449,16 @@ const sidebarEl       = document.getElementById('sidebar');
 const collapseBtnEl   = document.getElementById('collapse-sidebar');
 const expandBtnEl     = document.getElementById('expand-sidebar');
 
+// Toggling the sidebar is a pure CSS / overlay change — the canvas is
+// always full-screen behind it, so we must NOT refit or re-render here
+// (that would discard the user's zoom / pan / rotation).
 collapseBtnEl.addEventListener('click', e => {
     e.stopPropagation();
     document.body.classList.add('sidebar-hidden');
-    fitView();
-    render();
 });
 
 expandBtnEl.addEventListener('click', () => {
     document.body.classList.remove('sidebar-hidden');
-    fitView();
-    render();
 });
 
 // Wind strength (F3..F7) radio buttons.
