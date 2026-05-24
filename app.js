@@ -676,9 +676,9 @@ function render() {
         drawCourse(ctx);
     }
 
-    // Touch mode: keep the centre-anchored tooltip in sync with the
-    // current pan/zoom — call AFTER render so all transforms are settled.
-    if (IS_TOUCH) updateCenterTooltip();
+    // Mark tips (per-mark wind/current readouts) — must run AFTER all
+    // canvas transforms are settled so screen positions are accurate.
+    updateMarkTips();
 
     // Reposition the "show sidebar" button (when collapsed) so it sits
     // just below the top-overlay row, under whichever block is leftmost.
@@ -1574,7 +1574,9 @@ canvasEl.addEventListener('pointerdown', e => {
         dragInfo = {
             pid: e.pointerId,
             sx: e.clientX, sy: e.clientY,
-            panX: viewport.panX, panY: viewport.panY
+            panX: viewport.panX, panY: viewport.panY,
+            tapCandidate: true,
+            t0: performance.now()
         };
         canvasEl.classList.add('dragging');
         hideTooltip();
@@ -1603,6 +1605,12 @@ canvasEl.addEventListener('pointermove', e => {
         // pre-rotation coords before adding it to viewport.pan*.
         let dsx = (e.clientX - dragInfo.sx) * dpr;
         let dsy = (e.clientY - dragInfo.sy) * dpr;
+        // Once the user has moved more than a few pixels it's no longer
+        // a tap — convert to a drag for good.
+        if (dragInfo.tapCandidate &&
+            Math.hypot(e.clientX - dragInfo.sx, e.clientY - dragInfo.sy) > 8) {
+            dragInfo.tapCandidate = false;
+        }
         if (view.rotation !== 0) {
             const cosR = Math.cos(-view.rotation);
             const sinR = Math.sin(-view.rotation);
@@ -1655,6 +1663,12 @@ canvasEl.addEventListener('pointermove', e => {
 });
 
 function endPointer(e) {
+    // Tap detection: short press without significant movement → show the
+    // tooltip at the tap position (mobile equivalent of mouse hover).
+    if (dragInfo && dragInfo.pid === e.pointerId && dragInfo.tapCandidate
+        && (performance.now() - dragInfo.t0) < 500) {
+        updateTooltip({ clientX: dragInfo.sx, clientY: dragInfo.sy });
+    }
     pointers.delete(e.pointerId);
     if (pointers.size < 2) pinchInfo = null;
     if (pointers.size === 0) {
@@ -1692,45 +1706,117 @@ canvasEl.addEventListener('dblclick', () => {
 // -------------------------------------------------------------------------
 // Tooltip
 //
-// On mouse-primary devices the tooltip follows the cursor.  On touch
-// devices we instead sample the canvas centre (where #crosshair sits) and
-// position the tooltip just above it — this gives mobile / tablet users
-// a way to read wind / current values without a true "hover" gesture.
+// Desktop (mouse / fine pointer):    tooltip follows the cursor on hover.
+// Mobile  (touch / coarse pointer):  tap-to-show — a single short tap on
+// the map shows the tooltip at the tap location until the user pans or
+// taps again.  No persistent crosshair / centre tooltip anymore.
 // -------------------------------------------------------------------------
 
 const tooltipEl = document.getElementById('tooltip');
 const IS_TOUCH  = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
-if (IS_TOUCH) document.body.classList.add('touch-mode');
 
 function hideTooltip() {
-    if (IS_TOUCH) return;   // touch tooltip stays pinned to centre
     tooltipEl.style.display = 'none';
 }
 
-// Touch-mode: sample whatever world coord is under the canvas centre
-// (where the crosshair sits) and display the tooltip just above it.
-function updateCenterTooltip() {
-    if (!state.map) { tooltipEl.style.display = 'none'; return; }
-    if (!state.activeWindGrid && !state.activeCurrentGrid) {
-        tooltipEl.style.display = 'none';
-        return;
+// -------------------------------------------------------------------------
+// Mark tooltips — permanent per-mark wind/current readouts shown when a
+// course is loaded.  One box per: SL midpoint, FL midpoint, every leg's
+// rounding mark (arc centre), and every gate midpoint.  Rebuilt on every
+// render() so they follow pan/zoom and update with the slider.
+// -------------------------------------------------------------------------
+
+const markTipsHost = document.getElementById('mark-tips');
+
+function _compassFrom(d) { return ((-d * 180 / Math.PI) % 360 + 360) % 360; }
+
+function _markTipHTML(worldX, worldY) {
+    const b = MAPS[state.map];
+    const n = state.gridSize;
+    const gxF = (worldX - b.xmin) / (b.xmax - b.xmin) * (n - 1);
+    const gyF = (worldY - b.ymin) / (b.ymax - b.ymin) * (n - 1);
+    const inside = gxF >= 0 && gxF <= n - 1 && gyF >= 0 && gyF <= n - 1;
+
+    const lines = [];
+    if (state.wind && state.activeWindGrid) {
+        let m, d;
+        if (inside) {
+            const s = bilinearSampleVector(state.activeWindGrid, n, gxF, gyF);
+            if (s) { m = s.mag; d = s.dir; }
+        } else {
+            const fb = getFallbackWind(state.map, state.wind);
+            if (fb) { m = fb.mag; d = fb.dir; }
+        }
+        if (m !== undefined) {
+            const kn = m * windMultiplier(state.windForce);
+            lines.push(`<div><span class="lbl">W</span>${kn.toFixed(1)} kn @ ${_compassFrom(d).toFixed(0)}°</div>`);
+        }
     }
-    const canvas = canvasEl;
-    const cssW = canvas.clientWidth, cssH = canvas.clientHeight;
-    const cssX = cssW / 2, cssY = cssH / 2;
-    // Synthesize a "pointermove-like" event at the centre.
-    const rect = canvas.getBoundingClientRect();
-    updateTooltip({ clientX: rect.left + cssX, clientY: rect.top + cssY });
-    if (tooltipEl.style.display === 'block') {
-        // Re-position: just above the crosshair, centred horizontally.
-        const ttW = tooltipEl.offsetWidth;
-        const ttH = tooltipEl.offsetHeight;
-        let left = rect.left + cssX - ttW / 2;
-        let top  = rect.top + cssY - ttH - 22;     // 22 ≈ crosshair half + gap
-        if (left < 6) left = 6;
-        if (top  < 6) top  = rect.top + cssY + 22; // flip below if no room above
-        tooltipEl.style.left = left + 'px';
-        tooltipEl.style.top  = top + 'px';
+    if (state.showCurrent && state.activeCurrentGrid && inside) {
+        const s = bilinearSampleVector(state.activeCurrentGrid, n, gxF, gyF);
+        if (s) {
+            const kn = s.mag * CURRENT_MULTIPLIER;
+            lines.push(`<div><span class="lbl">C</span>${kn.toFixed(2)} kn @ ${_compassFrom(s.dir).toFixed(0)}°</div>`);
+        }
+    }
+    return lines.length ? lines.join('') : null;
+}
+
+function updateMarkTips() {
+    if (!markTipsHost) return;
+    markTipsHost.innerHTML = '';
+
+    // Course-only feature — and only worth showing when at least one
+    // layer is active to sample from.
+    if (!state.locked || !state.course || !state.map) return;
+    if (!state.wind && !state.showCurrent) return;
+
+    const c = state.course;
+    const marks = [];
+
+    if (c.SL) marks.push({
+        x: (c.SL.leftX + c.SL.rightX) / 2,
+        y: (c.SL.leftY + c.SL.rightY) / 2
+    });
+    if (c.FL && c.FL.leftX !== undefined) marks.push({
+        x: (c.FL.leftX + c.FL.rightX) / 2,
+        y: (c.FL.leftY + c.FL.rightY) / 2
+    });
+    if (c.Legs) for (const l of c.Legs) {
+        if (l.isGate && l.gate) marks.push({
+            x: (l.gate.leftX + l.gate.rightX) / 2,
+            y: (l.gate.leftY + l.gate.rightY) / 2
+        });
+        else if (l.arc && l.arc.centerX !== undefined) marks.push({
+            x: l.arc.centerX,
+            y: l.arc.centerY
+        });
+    }
+
+    const dpr = window.devicePixelRatio || 1;
+    const cx = view.canvasW / 2, cy = view.canvasH / 2;
+    const isRot = view.rotation !== 0;
+    const cosR  = Math.cos(view.rotation), sinR = Math.sin(view.rotation);
+
+    for (const m of marks) {
+        const html = _markTipHTML(m.x, m.y);
+        if (!html) continue;
+
+        // Pre-rotation screen position → POST-rotation (visual) position.
+        const p = worldToScreen(m.x, m.y);
+        let vx = p.x, vy = p.y;
+        if (isRot) {
+            const dx = p.x - cx, dy = p.y - cy;
+            vx = dx * cosR - dy * sinR + cx;
+            vy = dx * sinR + dy * cosR + cy;
+        }
+
+        const tip = document.createElement('div');
+        tip.className = 'mark-tip';
+        tip.innerHTML = html;
+        tip.style.left = (vx / dpr) + 'px';
+        tip.style.top  = (vy / dpr) + 'px';
+        markTipsHost.appendChild(tip);
     }
 }
 
