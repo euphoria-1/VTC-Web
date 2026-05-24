@@ -1532,6 +1532,13 @@ let sliderRafPending = false;
 slider.addEventListener('input', () => {
     state.sliderSeconds = parseInt(slider.value, 10) || 0;
     unpinTide();
+    // Scrubbing the time slider is meaningful only when the current
+    // layer is visible — auto-enable it on the first drag (matches the
+    // "TIMELINE" visual idea where the slider IS the tide playback).
+    if (!state.showCurrent && state.map && !NO_TIDE_MAPS.has(state.map)) {
+        state.showCurrent = true;
+        refreshLockToggles();
+    }
     if (sliderRafPending) return;
     sliderRafPending = true;
     requestAnimationFrame(async () => {
