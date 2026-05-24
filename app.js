@@ -1364,10 +1364,21 @@ function updateBlendButton() {
 // -------------------------------------------------------------------------
 
 function enterLockedMode() {
+    // Called early in init() (before state.wind has been applied from
+    // the URL).  Just flip the body class so the sidebar hides without
+    // a flash; the wind direction snapshot + toggle highlight happen
+    // later via finaliseLockedMode().
     state.locked = true;
-    state._lockedWind = state.wind;     // remember the URL-supplied direction
     document.body.classList.add('locked-mode');
     document.getElementById('blend-indicator').style.display = 'block';
+}
+
+// Called AFTER state.wind has been set from ?code= / ?wind=, so the
+// URL-supplied direction is the one we remember as the "preselected"
+// wind to come back to when the user toggles the layer off and on.
+function finaliseLockedMode() {
+    if (!state.locked) return;
+    state._lockedWind = state.wind;
     refreshLockToggles();
 }
 
@@ -2032,6 +2043,9 @@ window.addEventListener('resize', () => {
         document.querySelectorAll('.tide-btn').forEach(b => {
             b.classList.toggle('active', b.dataset.tide === state.tideButton);
         });
+        // Capture the URL-supplied wind direction now that state.wind
+        // is populated, and highlight the bottom-left "Wind" toggle.
+        finaliseLockedMode();
     }
 
     updateHud();
