@@ -578,7 +578,9 @@
         font-variant-numeric: tabular-nums;
         line-height: 1.25;
         white-space: nowrap;
-        transform: translate(10px, -50%);   /* offset so it sits beside the mark */
+        /* Box is anchored at the mark coords and shifted UP (so it sits
+           above the mark instead of covering it) and slightly to the right. */
+        transform: translate(8px, calc(-100% - 6px));
     }
     .mark-tip .lbl { color: #9aa6b2; margin-right: 3px; }
 

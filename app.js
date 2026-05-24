@@ -1076,9 +1076,13 @@ async function selectMap(mapName) {
 }
 
 async function refreshActiveLayers() {
-    if (state.wind && state.map) {
+    // Wind grid: load if ANY direction has been selected (current or
+    // last-remembered) — so mark-tip readouts work even when the wind
+    // layer is toggled OFF.  Render-time visibility uses state.wind.
+    const windDir = state.wind || state._lockedWind;
+    if (windDir && state.map) {
         try {
-            const g = await loadWindBin(state.map, state.wind);
+            const g = await loadWindBin(state.map, windDir);
             state.activeWindGrid = g;
             state.windMaxMag = maxMagOf(g);
             state.gridSize = Math.round(Math.sqrt(g.length / 2));
@@ -1093,7 +1097,9 @@ async function refreshActiveLayers() {
         state.windMaxMag = 0;
     }
 
-    if (state.showCurrent && state.map && !NO_TIDE_MAPS.has(state.map)) {
+    // Current grid: load whenever the map has tide data, regardless of
+    // the show-current toggle, so mark tips can sample it.
+    if (state.map && !NO_TIDE_MAPS.has(state.map)) {
         try {
             const grid = await computeCurrentGrid();
             const prev = state.activeCurrentGrid;
@@ -1738,13 +1744,17 @@ function _markTipHTML(worldX, worldY) {
     const inside = gxF >= 0 && gxF <= n - 1 && gyF >= 0 && gyF <= n - 1;
 
     const lines = [];
-    if (state.wind && state.activeWindGrid) {
+
+    // Always show wind, regardless of the wind toggle.  Uses whichever
+    // direction was most recently selected (state.wind or _lockedWind).
+    const windDir = state.wind || state._lockedWind;
+    if (windDir && state.activeWindGrid) {
         let m, d;
         if (inside) {
             const s = bilinearSampleVector(state.activeWindGrid, n, gxF, gyF);
             if (s) { m = s.mag; d = s.dir; }
         } else {
-            const fb = getFallbackWind(state.map, state.wind);
+            const fb = getFallbackWind(state.map, windDir);
             if (fb) { m = fb.mag; d = fb.dir; }
         }
         if (m !== undefined) {
@@ -1752,7 +1762,10 @@ function _markTipHTML(worldX, worldY) {
             lines.push(`<div><span class="lbl">W</span>${kn.toFixed(1)} kn @ ${_compassFrom(d).toFixed(0)}°</div>`);
         }
     }
-    if (state.showCurrent && state.activeCurrentGrid && inside) {
+
+    // Always show current, regardless of the current toggle, as long as
+    // the map has tide data and the mark is inside the grid.
+    if (state.activeCurrentGrid && inside) {
         const s = bilinearSampleVector(state.activeCurrentGrid, n, gxF, gyF);
         if (s) {
             const kn = s.mag * CURRENT_MULTIPLIER;
@@ -1766,21 +1779,16 @@ function updateMarkTips() {
     if (!markTipsHost) return;
     markTipsHost.innerHTML = '';
 
-    // Course-only feature — and only worth showing when at least one
-    // layer is active to sample from.
     if (!state.locked || !state.course || !state.map) return;
-    if (!state.wind && !state.showCurrent) return;
 
     const c = state.course;
+    // Course-sequence order: start line, every leg's mark/gate in race
+    // order, finish line last.  Drives z-index so earlier marks render
+    // above later marks when their boxes overlap.
     const marks = [];
-
     if (c.SL) marks.push({
         x: (c.SL.leftX + c.SL.rightX) / 2,
         y: (c.SL.leftY + c.SL.rightY) / 2
-    });
-    if (c.FL && c.FL.leftX !== undefined) marks.push({
-        x: (c.FL.leftX + c.FL.rightX) / 2,
-        y: (c.FL.leftY + c.FL.rightY) / 2
     });
     if (c.Legs) for (const l of c.Legs) {
         if (l.isGate && l.gate) marks.push({
@@ -1792,13 +1800,19 @@ function updateMarkTips() {
             y: l.arc.centerY
         });
     }
+    if (c.FL && c.FL.leftX !== undefined) marks.push({
+        x: (c.FL.leftX + c.FL.rightX) / 2,
+        y: (c.FL.leftY + c.FL.rightY) / 2
+    });
 
     const dpr = window.devicePixelRatio || 1;
     const cx = view.canvasW / 2, cy = view.canvasH / 2;
     const isRot = view.rotation !== 0;
     const cosR  = Math.cos(view.rotation), sinR = Math.sin(view.rotation);
 
-    for (const m of marks) {
+    const N = marks.length;
+    for (let i = 0; i < N; i++) {
+        const m = marks[i];
         const html = _markTipHTML(m.x, m.y);
         if (!html) continue;
 
@@ -1816,6 +1830,8 @@ function updateMarkTips() {
         tip.innerHTML = html;
         tip.style.left = (vx / dpr) + 'px';
         tip.style.top  = (vy / dpr) + 'px';
+        // Earliest mark on top → highest z-index.
+        tip.style.zIndex = String(N - i);
         markTipsHost.appendChild(tip);
     }
 }
