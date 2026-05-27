@@ -863,8 +863,8 @@ function drawCourse(ctx) {
     }
     const markRadiusPx = 4 * mPerPx;   // 4 m in screen pixels
     if (markRadiusPx >= 1.5) {
-        ctx.strokeStyle = '#FFFFFF';
-        ctx.lineWidth   = 1.5 * dpr;
+        ctx.strokeStyle = '#FFA500';
+        ctx.lineWidth   = 2 * dpr;
         for (const [mx, my] of marks) {
             const p = g2s(mx, my);
             ctx.beginPath();
