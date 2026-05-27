@@ -707,6 +707,7 @@ function render() {
     updateUserTips();
     resolveTipOverlaps();   // mobile: stop boxes from stacking on each other
     updateInfoBar();
+    updateCompass();
 
     // Reposition the "show sidebar" button (when collapsed) so it sits
     // just below the top-overlay row, under whichever block is leftmost.
@@ -1080,6 +1081,7 @@ async function selectMap(mapName) {
     document.getElementById('hud').style.display = 'block';
     document.getElementById('slider-wrap').classList.add('visible');
     document.getElementById('lock-toggles').classList.add('visible');
+    document.getElementById('compass').classList.add('visible');
 
     if (NO_TIDE_MAPS.has(mapName)) {
         state.showCurrent = false;
@@ -2095,6 +2097,32 @@ function escapeHTML(s) {
     return String(s)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;')
         .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// -------------------------------------------------------------------------
+// Compass rose — rotates so the red arrow always points to true North.
+// The canvas is rotated by `view.rotation` (course-up); the compass lives
+// OUTSIDE that transform, so we apply the same rotation to the SVG rose
+// to mirror the visual rotation of world coords.
+// -------------------------------------------------------------------------
+
+const compassRoseEl = document.getElementById('compass-rose');
+const compassEl     = document.getElementById('compass');
+
+function updateCompass() {
+    if (!compassRoseEl) return;
+    const deg = ((view.rotation || 0) * 180 / Math.PI).toFixed(1);
+    compassRoseEl.setAttribute('transform', `rotate(${deg})`);
+}
+
+// Tap the compass to hide it; tap doesn't reach the canvas (so no dot
+// is dropped underneath).  Once hidden it stays hidden until the page
+// is reloaded — that's the spec for this widget.
+if (compassEl) {
+    compassEl.addEventListener('click', e => {
+        e.stopPropagation();
+        compassEl.classList.add('is-hidden');
+    });
 }
 
 // -------------------------------------------------------------------------

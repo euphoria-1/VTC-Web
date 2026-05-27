@@ -377,6 +377,7 @@
         bottom: 16px;
         left: 320px;
         display: none;
+        flex-direction: column-reverse;   /* Current on top of Wind */
         gap: 8px;
         z-index: 6;
     }
@@ -401,6 +402,27 @@
         border-color: #e34a3a;
         color: #fff;
     }
+
+    /* ---------- Compass rose (north indicator) ------------------------------- */
+    #compass {
+        position: absolute;
+        bottom: 110px;     /* sits above the (now-stacked) Wind/Current toggles */
+        left: 320px;       /* default mode: clear of the sidebar */
+        width: 44px;
+        height: 44px;
+        background: rgba(20,20,28,0.85);
+        border: 1px solid rgba(255,255,255,0.18);
+        border-radius: 50%;
+        backdrop-filter: blur(4px);
+        z-index: 6;
+        cursor: pointer;
+        display: none;     /* shown by JS once a map is loaded */
+    }
+    #compass.visible       { display: block; }
+    #compass.is-hidden     { display: none !important; }
+    body.sidebar-hidden #compass,
+    body.locked-mode    #compass { left: 16px; }
+    #compass-rose          { transition: transform 120ms linear; }
 
     /* ---------- Show-sidebar button (when default-mode sidebar collapsed) ---- */
     #expand-sidebar {
@@ -729,6 +751,24 @@
         <div id="lock-toggles">
             <button class="lock-btn" id="lock-wind-btn">Wind</button>
             <button class="lock-btn" id="lock-current-btn">Current</button>
+        </div>
+
+        <!-- Compass rose: shows where true North is given the current
+             course-up rotation.  Tap to dismiss (and again to bring back).  -->
+        <div id="compass" title="North indicator (tap to hide)">
+            <svg viewBox="-20 -20 40 40" width="100%" height="100%">
+                <g id="compass-rose">
+                    <polygon points="0,-15 -5,4 5,4"  fill="#ff3b30"
+                             stroke="#fff" stroke-width="0.5"
+                             stroke-linejoin="round"/>
+                    <polygon points="0, 15 -5,-4 5,-4" fill="#888"
+                             stroke="#fff" stroke-width="0.5"
+                             stroke-linejoin="round"/>
+                    <text x="0" y="-6" text-anchor="middle"
+                          font-size="7" font-weight="700" fill="#fff"
+                          font-family="-apple-system, Segoe UI, sans-serif">N</text>
+                </g>
+            </svg>
         </div>
 
         <!-- Tidal-phase indicator -->
