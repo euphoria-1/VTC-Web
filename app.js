@@ -323,6 +323,14 @@ const state = {
     // Game coords are in metres, same convention as MAPS[mapName].
     course: null,
 
+    // Optional course-meta fields piggy-backed on the ?code= payload.
+    courseName: '',          // e.g. "Up-Down 1.0 nm"
+    shiftMode:  '',          // 'None' | 'Stable' | 'Osci' | 'Shifty' | 'Wild'
+
+    // User-placed dots (right-click). Each: { x, y } in game metres.
+    // Multiple allowed; right-clicking near an existing dot removes it.
+    userDots: [],
+
     landImages: {},
     windBins: {},
     tideBins: {},
@@ -488,12 +496,30 @@ function fitView() {
     if (!state.map) return;
     const dpr = window.devicePixelRatio || 1;
 
+    // Compute the course-up rotation FIRST, so the bbox can be rotated
+    // into screen space before we choose a scale.  Otherwise a course
+    // rotated by 90° squeezes into the wrong axis and ends up too big.
+    let rotation = 0;
+    if (state.course && state.course.Legs && state.course.Legs.length > 0) {
+        const c0 = state.course;
+        const leg0 = c0.Legs[0];
+        const slMidX = (c0.SL.leftX + c0.SL.rightX) / 2;
+        const slMidY = (c0.SL.leftY + c0.SL.rightY) / 2;
+        const startX = (typeof leg0.startX === 'number') ? leg0.startX : slMidX;
+        const startY = (typeof leg0.startY === 'number') ? leg0.startY : slMidY;
+        const dx = leg0.endX - startX;
+        const dy = leg0.endY - startY;
+        if (dx !== 0 || dy !== 0) rotation = Math.atan2(dx, dy);
+    }
+    view.rotation = rotation;
+
     let xmin, xmax, ymin, ymax;
     const cb = courseBounds();
     if (cb) {
-        // Pad the course bbox by ~15 % so marks aren't right on the edge.
-        const padX = (cb.xmax - cb.xmin) * 0.15;
-        const padY = (cb.ymax - cb.ymin) * 0.15;
+        // Pad the course bbox by ~20 % so marks aren't right on the
+        // edge. Slightly more breathing room than the AHK preview.
+        const padX = (cb.xmax - cb.xmin) * 0.20;
+        const padY = (cb.ymax - cb.ymin) * 0.20;
         xmin = cb.xmin - padX; xmax = cb.xmax + padX;
         ymin = cb.ymin - padY; ymax = cb.ymax + padY;
     } else {
@@ -504,13 +530,28 @@ function fitView() {
         ymax = Math.max(lb.BottomZ, lb.TopZ);
     }
 
+    // Untransformed extents (used for ax/bx/ay/by below). The fit
+    // scale, however, must be computed from the rotation-aware extents
+    // because render() rotates the canvas around its centre.
+    let fitW = xmax - xmin;
+    let fitH = ymax - ymin;
+    if (cb && rotation !== 0) {
+        // Rotate the bbox corners around its centre by `rotation` and
+        // recompute extents.  The world-X axis is flipped on canvas, so
+        // the visual rotation seen on screen is the same `rotation`
+        // value applied to canvas coords — that's what we sized for.
+        const ax = Math.abs(Math.cos(rotation));
+        const ay = Math.abs(Math.sin(rotation));
+        fitW = (xmax - xmin) * ax + (ymax - ymin) * ay;
+        fitH = (xmax - xmin) * ay + (ymax - ymin) * ax;
+    }
+
     const margin = 16 * dpr;
-    const w = xmax - xmin;
-    const h = ymax - ymin;
-    const sx = (view.canvasW - 2 * margin) / w;
-    const sy = (view.canvasH - 2 * margin) / h;
+    const sx = (view.canvasW - 2 * margin) / fitW;
+    const sy = (view.canvasH - 2 * margin) / fitH;
     const s  = Math.min(sx, sy);
 
+    const w = xmax - xmin, h = ymax - ymin;
     const drawW = w * s, drawH = h * s;
     const offX = (view.canvasW - drawW) / 2;
     const offY = (view.canvasH - drawH) / 2;
@@ -525,26 +566,6 @@ function fitView() {
     viewport.scale = 1;
     viewport.panX = 0;
     viewport.panY = 0;
-
-    // Rotation: when a course is loaded, rotate so the first leg points
-    // UP on screen (matching a sailor's "course up" chart orientation).
-    view.rotation = 0;
-    if (state.course && state.course.Legs && state.course.Legs.length > 0) {
-        const c0 = state.course;
-        const leg0 = c0.Legs[0];
-        const slMidX = (c0.SL.leftX + c0.SL.rightX) / 2;
-        const slMidY = (c0.SL.leftY + c0.SL.rightY) / 2;
-        const startX = (typeof leg0.startX === 'number') ? leg0.startX : slMidX;
-        const startY = (typeof leg0.startY === 'number') ? leg0.startY : slMidY;
-        const dx = leg0.endX - startX;
-        const dy = leg0.endY - startY;
-        if (dx !== 0 || dy !== 0) {
-            // The viewport rotation angle θ such that the leg direction
-            // (vx, vy) ends up pointing to screen (0, −1) — see
-            // derivation in commit notes.
-            view.rotation = Math.atan2(dx, dy);
-        }
-    }
 }
 
 // Compute the axis-aligned bounding box covering every mark of the
@@ -676,9 +697,15 @@ function render() {
         drawCourse(ctx);
     }
 
+    // 5. User-placed dots (right-click). Drawn on canvas so they
+    //    follow rotation/zoom; the value boxes are HTML siblings.
+    drawUserDots(ctx);
+
     // Mark tips (per-mark wind/current readouts) — must run AFTER all
     // canvas transforms are settled so screen positions are accurate.
     updateMarkTips();
+    updateUserTips();
+    updateInfoBar();
 
     // Reposition the "show sidebar" button (when collapsed) so it sits
     // just below the top-overlay row, under whichever block is leftmost.
@@ -1572,6 +1599,9 @@ function cssToCanvas(p) {
 
 canvasEl.addEventListener('pointerdown', e => {
     if (!state.map) return;
+    // Right-click is handled by the 'contextmenu' listener below (adds /
+    // removes a user dot). Skip it here so it doesn't trigger pan/pinch.
+    if (e.button === 2) return;
     canvasEl.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, pointerPosCss(e));
 
@@ -1708,6 +1738,45 @@ canvasEl.addEventListener('dblclick', () => {
     render();
 });
 
+// Right-click: drop a dot at the cursor that shows wind/current at that
+// world position. Clicking near an existing dot (within DOT_HIT_PX CSS px
+// of its on-screen centre) removes it instead.
+canvasEl.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    if (!state.map) return;
+
+    const cv = cssToCanvas({ x: e.clientX, y: e.clientY });
+    const dpr = window.devicePixelRatio || 1;
+    const cx = view.canvasW / 2, cy = view.canvasH / 2;
+    const cosR = Math.cos(view.rotation), sinR = Math.sin(view.rotation);
+
+    // Find the closest existing dot in POST-rotation canvas coords.
+    let hitIdx = -1, hitDist = Infinity;
+    for (let i = 0; i < state.userDots.length; i++) {
+        const d = state.userDots[i];
+        const p = worldToScreen(d.x, d.y);          // pre-rotation
+        let vx = p.x, vy = p.y;
+        if (view.rotation !== 0) {
+            const dx = p.x - cx, dy = p.y - cy;
+            vx = dx * cosR - dy * sinR + cx;
+            vy = dx * sinR + dy * cosR + cy;
+        }
+        // Convert to CSS px for an intuitive radius.
+        const dist = Math.hypot((vx - cv.x) / dpr, (vy - cv.y) / dpr);
+        if (dist < hitDist) { hitDist = dist; hitIdx = i; }
+    }
+
+    if (hitIdx >= 0 && hitDist <= DOT_HIT_PX) {
+        // Within hit radius → remove that dot.
+        state.userDots.splice(hitIdx, 1);
+    } else {
+        // Otherwise → drop a new dot at the click's world coords.
+        const w = screenToWorld(cv.x, cv.y);
+        state.userDots.push({ x: w.x, y: w.y });
+    }
+    render();
+});
+
 // -------------------------------------------------------------------------
 // Tooltip
 //
@@ -1833,6 +1902,119 @@ function updateMarkTips() {
         tip.style.zIndex = String(N - i);
         markTipsHost.appendChild(tip);
     }
+}
+
+// -------------------------------------------------------------------------
+// User-placed dots (right-click on the map). Each dot shows the same
+// wind/current readout as a course mark, anchored top-left at the dot.
+// -------------------------------------------------------------------------
+
+const userTipsHost = document.getElementById('user-tips');
+const DOT_HIT_PX   = 14;          // CSS px — click within this radius removes
+
+function drawUserDots(ctx) {
+    if (!state.userDots || state.userDots.length === 0) return;
+    const dpr = window.devicePixelRatio || 1;
+    const r   = 5 * dpr;
+    ctx.save();
+    ctx.fillStyle   = '#ff3b30';                     // red dot
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth   = 1.5 * dpr;
+    for (const d of state.userDots) {
+        const p = worldToScreen(d.x, d.y);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+
+function updateUserTips() {
+    if (!userTipsHost) return;
+    userTipsHost.innerHTML = '';
+    if (!state.userDots || state.userDots.length === 0 || !state.map) return;
+
+    const dpr  = window.devicePixelRatio || 1;
+    const cx   = view.canvasW / 2, cy = view.canvasH / 2;
+    const isR  = view.rotation !== 0;
+    const cosR = Math.cos(view.rotation), sinR = Math.sin(view.rotation);
+
+    for (const d of state.userDots) {
+        const html = _markTipHTML(d.x, d.y);
+        if (!html) continue;
+
+        const p = worldToScreen(d.x, d.y);
+        let vx = p.x, vy = p.y;
+        if (isR) {
+            const dx = p.x - cx, dy = p.y - cy;
+            vx = dx * cosR - dy * sinR + cx;
+            vy = dx * sinR + dy * cosR + cy;
+        }
+        const tip = document.createElement('div');
+        tip.className = 'user-tip';
+        tip.innerHTML = html;
+        tip.style.left = (vx / dpr) + 'px';
+        tip.style.top  = (vy / dpr) + 'px';
+        userTipsHost.appendChild(tip);
+    }
+}
+
+// -------------------------------------------------------------------------
+// Bottom-right info bar: single-line summary of the loaded course.
+// -------------------------------------------------------------------------
+
+const infoBarEl = document.getElementById('info-bar');
+
+// Pretty labels for the wind-direction radio values used in state.wind
+// (e.g. "north_east" → "NE").
+const WIND_LABEL = {
+    north: 'N', north_east: 'NE', east: 'E', south_east: 'SE',
+    south: 'S', south_west: 'SW', west: 'W', north_west: 'NW'
+};
+
+// Sum the straight-line leg distances in nautical miles.
+function courseLengthNm() {
+    const c = state.course;
+    if (!c || !c.Legs || c.Legs.length === 0 || !c.SL) return 0;
+    const slMidX = (c.SL.leftX + c.SL.rightX) / 2;
+    const slMidY = (c.SL.leftY + c.SL.rightY) / 2;
+    let totalM = 0;
+    for (let i = 0; i < c.Legs.length; i++) {
+        const leg = c.Legs[i];
+        const sx = (typeof leg.startX === 'number') ? leg.startX : slMidX;
+        const sy = (typeof leg.startY === 'number') ? leg.startY : slMidY;
+        totalM += Math.hypot(leg.endX - sx, leg.endY - sy);
+    }
+    return totalM / 1852;
+}
+
+function updateInfoBar() {
+    if (!infoBarEl) return;
+    if (!state.course || !state.map) {
+        infoBarEl.style.display = 'none';
+        return;
+    }
+    const parts = [];
+    parts.push(state.map);
+    if (state.courseName) parts.push(state.courseName);
+    const nm = courseLengthNm();
+    if (nm > 0) parts.push(nm.toFixed(2) + ' nm');
+    const dir = state.wind || state._lockedWind;
+    if (dir && WIND_LABEL[dir]) parts.push(WIND_LABEL[dir]);
+    if (state.windForce) parts.push(state.windForce);
+    if (state.shiftMode) parts.push(state.shiftMode);
+
+    infoBarEl.innerHTML = parts
+        .map(s => `<span>${escapeHTML(s)}</span>`)
+        .join('<span class="sep">|</span>');
+    infoBarEl.style.display = 'block';
+}
+
+function escapeHTML(s) {
+    return String(s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // -------------------------------------------------------------------------
@@ -2005,6 +2187,10 @@ window.addEventListener('resize', () => {
         setSliderMax(3600);
         enterLockedMode();
     }
+
+    // Course-meta fields piggy-backed on the payload.
+    if (p('courseName')) state.courseName = String(p('courseName'));
+    if (p('shiftMode'))  state.shiftMode  = String(p('shiftMode'));
 
     if (p('t') != null) {
         const t = parseInt(p('t'), 10) || 0;

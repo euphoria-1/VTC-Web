@@ -584,6 +584,50 @@
     }
     .mark-tip .lbl { color: #9aa6b2; margin-right: 3px; }
 
+    /* User-placed dots (right-click to add/remove) — same look as mark
+       tips but the box's top-left corner anchors at the dot (per spec). */
+    #user-tips {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 4;
+    }
+    .user-tip {
+        position: absolute;
+        background: rgba(20,20,28,0.85);
+        border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 5px;
+        padding: 3px 6px;
+        font-size: 10px;
+        color: #fff;
+        font-variant-numeric: tabular-nums;
+        line-height: 1.25;
+        white-space: nowrap;
+        /* Box top-left sits next to the dot. */
+        transform: translate(8px, 4px);
+    }
+    .user-tip .lbl { color: #9aa6b2; margin-right: 3px; }
+
+    /* Bottom-right info strip: location | course | length | wind | strength | shift mode */
+    #info-bar {
+        position: absolute;
+        right: 14px;
+        bottom: 14px;
+        padding: 6px 12px;
+        background: rgba(20,20,28,0.85);
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 8px;
+        font-size: 12px;
+        color: #fff;
+        font-variant-numeric: tabular-nums;
+        line-height: 1.2;
+        white-space: nowrap;
+        z-index: 6;
+        display: none;          /* shown by JS once a course is loaded */
+        pointer-events: none;
+    }
+    #info-bar .sep { color: #6b7785; margin: 0 6px; }
+
     /* Cursor tooltip */
     #tooltip {
         position: fixed;
@@ -649,6 +693,8 @@
         <div id="status"></div>
         <div id="tooltip"></div>
         <div id="mark-tips"></div>
+        <div id="user-tips"></div>
+        <div id="info-bar"></div>
         <button id="expand-sidebar" title="Show menu">&#9776;</button>
 
         <!-- Bottom-left layer toggles (always visible once a map is picked) -->
