@@ -705,6 +705,7 @@ function render() {
     // canvas transforms are settled so screen positions are accurate.
     updateMarkTips();
     updateUserTips();
+    resolveTipOverlaps();   // mobile: stop boxes from stacking on each other
     updateInfoBar();
 
     // Reposition the "show sidebar" button (when collapsed) so it sits
@@ -1390,11 +1391,34 @@ function updateBlendIndicator() {
     // Always show in locked mode — even at pure tide moments — so the
     // user has a stable readout of where they are in the cycle.
     root.style.display = 'block';
-    document.getElementById('blend-fill').style.width = (bs.w2 * 100).toFixed(1) + '%';
-    document.getElementById('blend-pct-left').textContent  = Math.round(bs.w1 * 100) + '%';
-    document.getElementById('blend-pct-right').textContent = Math.round(bs.w2 * 100) + '%';
-    document.getElementById('blend-lbl-left').textContent  = ABBR[bs.state1].toUpperCase();
-    document.getElementById('blend-lbl-right').textContent = ABBR[bs.state2].toUpperCase();
+
+    // Layout rule (no jumping back to the left when a transitional tide
+    // peaks): the slack states (LOW, HIGH) always sit on the LEFT side
+    // of the bar, the flowing states (FLOOD, EBB) always sit on the
+    // RIGHT.  The bar fill represents the FLOWING side's weight, so it
+    // grows L→R during LOW→FLOOD / HIGH→EBB and shrinks R→L during
+    // FLOOD→HIGH / EBB→LOW.  No mid-cycle label flip.
+    const SLACK   = { low: true, high: true };
+    let leftState, rightState, leftW, rightW;
+    if (SLACK[bs.state1] && !SLACK[bs.state2]) {
+        // Growing phase: slack → flowing.
+        leftState  = bs.state1;  leftW  = bs.w1;     // 100 → 0 %
+        rightState = bs.state2;  rightW = bs.w2;     //   0 → 100 %
+    } else if (!SLACK[bs.state1] && SLACK[bs.state2]) {
+        // Shrinking phase: flowing → slack.
+        leftState  = bs.state2;  leftW  = bs.w2;     //   0 → 100 %
+        rightState = bs.state1;  rightW = bs.w1;     // 100 → 0 %
+    } else {
+        // Fallback (shouldn't happen with the existing 4-state cycle).
+        leftState  = bs.state1;  leftW  = bs.w1;
+        rightState = bs.state2;  rightW = bs.w2;
+    }
+
+    document.getElementById('blend-fill').style.width = (rightW * 100).toFixed(1) + '%';
+    document.getElementById('blend-pct-left').textContent  = Math.round(leftW  * 100) + '%';
+    document.getElementById('blend-pct-right').textContent = Math.round(rightW * 100) + '%';
+    document.getElementById('blend-lbl-left').textContent  = ABBR[leftState ].toUpperCase();
+    document.getElementById('blend-lbl-right').textContent = ABBR[rightState].toUpperCase();
 }
 
 // -------------------------------------------------------------------------
@@ -1599,8 +1623,7 @@ function cssToCanvas(p) {
 
 canvasEl.addEventListener('pointerdown', e => {
     if (!state.map) return;
-    // Right-click is handled by the 'contextmenu' listener below (adds /
-    // removes a user dot). Skip it here so it doesn't trigger pan/pinch.
+    // Ignore the right mouse button entirely: no pan, no dot drop.
     if (e.button === 2) return;
     canvasEl.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, pointerPosCss(e));
@@ -1698,11 +1721,16 @@ canvasEl.addEventListener('pointermove', e => {
 });
 
 function endPointer(e) {
-    // Tap detection: short press without significant movement → show the
-    // tooltip at the tap position (mobile equivalent of mouse hover).
+    // Tap / single-click without significant movement → place or remove a
+    // user dot at the cursor's world coords. Works for both desktop
+    // left-click and mobile tap.
     if (dragInfo && dragInfo.pid === e.pointerId && dragInfo.tapCandidate
         && (performance.now() - dragInfo.t0) < 500) {
-        updateTooltip({ clientX: dragInfo.sx, clientY: dragInfo.sy });
+        // Undo any sub-threshold pan that crept in during the tap so the
+        // view doesn't jiggle when the user just wants to drop a dot.
+        viewport.panX = dragInfo.panX;
+        viewport.panY = dragInfo.panY;
+        toggleUserDotAtCss(dragInfo.sx, dragInfo.sy);
     }
     pointers.delete(e.pointerId);
     if (pointers.size < 2) pinchInfo = null;
@@ -1710,6 +1738,39 @@ function endPointer(e) {
         dragInfo = null;
         canvasEl.classList.remove('dragging');
     }
+}
+
+// Place or remove a user dot. Click within DOT_HIT_PX (CSS px) of an
+// existing dot removes it; otherwise a new dot is dropped at the cursor.
+function toggleUserDotAtCss(clientX, clientY) {
+    if (!state.map) return;
+
+    const cv  = cssToCanvas({ x: clientX, y: clientY });
+    const dpr = window.devicePixelRatio || 1;
+    const cx  = view.canvasW / 2, cy = view.canvasH / 2;
+    const cosR = Math.cos(view.rotation), sinR = Math.sin(view.rotation);
+
+    let hitIdx = -1, hitDist = Infinity;
+    for (let i = 0; i < state.userDots.length; i++) {
+        const d = state.userDots[i];
+        const p = worldToScreen(d.x, d.y);
+        let vx = p.x, vy = p.y;
+        if (view.rotation !== 0) {
+            const dx = p.x - cx, dy = p.y - cy;
+            vx = dx * cosR - dy * sinR + cx;
+            vy = dx * sinR + dy * cosR + cy;
+        }
+        const dist = Math.hypot((vx - cv.x) / dpr, (vy - cv.y) / dpr);
+        if (dist < hitDist) { hitDist = dist; hitIdx = i; }
+    }
+
+    if (hitIdx >= 0 && hitDist <= DOT_HIT_PX) {
+        state.userDots.splice(hitIdx, 1);
+    } else {
+        const w = screenToWorld(cv.x, cv.y);
+        state.userDots.push({ x: w.x, y: w.y });
+    }
+    render();
 }
 canvasEl.addEventListener('pointerup',     endPointer);
 canvasEl.addEventListener('pointercancel', endPointer);
@@ -1738,44 +1799,24 @@ canvasEl.addEventListener('dblclick', () => {
     render();
 });
 
-// Right-click: drop a dot at the cursor that shows wind/current at that
-// world position. Clicking near an existing dot (within DOT_HIT_PX CSS px
-// of its on-screen centre) removes it instead.
-canvasEl.addEventListener('contextmenu', e => {
-    e.preventDefault();
-    if (!state.map) return;
+// Suppress the browser's native context menu so right-click on the map
+// is a no-op rather than popping up an unrelated menu.
+canvasEl.addEventListener('contextmenu', e => e.preventDefault());
 
-    const cv = cssToCanvas({ x: e.clientX, y: e.clientY });
-    const dpr = window.devicePixelRatio || 1;
-    const cx = view.canvasW / 2, cy = view.canvasH / 2;
-    const cosR = Math.cos(view.rotation), sinR = Math.sin(view.rotation);
-
-    // Find the closest existing dot in POST-rotation canvas coords.
-    let hitIdx = -1, hitDist = Infinity;
-    for (let i = 0; i < state.userDots.length; i++) {
-        const d = state.userDots[i];
-        const p = worldToScreen(d.x, d.y);          // pre-rotation
-        let vx = p.x, vy = p.y;
-        if (view.rotation !== 0) {
-            const dx = p.x - cx, dy = p.y - cy;
-            vx = dx * cosR - dy * sinR + cx;
-            vy = dx * sinR + dy * cosR + cy;
-        }
-        // Convert to CSS px for an intuitive radius.
-        const dist = Math.hypot((vx - cv.x) / dpr, (vy - cv.y) / dpr);
-        if (dist < hitDist) { hitDist = dist; hitIdx = i; }
-    }
-
-    if (hitIdx >= 0 && hitDist <= DOT_HIT_PX) {
-        // Within hit radius → remove that dot.
-        state.userDots.splice(hitIdx, 1);
-    } else {
-        // Otherwise → drop a new dot at the click's world coords.
-        const w = screenToWorld(cv.x, cv.y);
-        state.userDots.push({ x: w.x, y: w.y });
-    }
-    render();
-});
+// Tap-to-collapse for the on-screen overlays: bottom-right info bar,
+// top-right tide blend indicator, top-left HUD + legend.  Tap once to
+// shrink to a small dot; tap the dot again to expand.  Stops the tap
+// from bubbling to the canvas (which would otherwise drop a user dot).
+function wireCollapsible(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.add('is-collapsible');
+    el.addEventListener('click', e => {
+        e.stopPropagation();
+        el.classList.toggle('is-collapsed');
+    });
+}
+['info-bar', 'blend-indicator', 'hud', 'legend'].forEach(wireCollapsible);
 
 // -------------------------------------------------------------------------
 // Tooltip
@@ -1928,6 +1969,44 @@ function drawUserDots(ctx) {
         ctx.stroke();
     }
     ctx.restore();
+}
+
+// After the mark-tips + user-tips DOM has been populated for this frame,
+// run an O(n²) overlap pass: walk tips top-to-bottom and push any that
+// overlap a previously-placed one straight down until they clear.  Keeps
+// boxes from stacking on top of each other on small (mobile) viewports.
+function resolveTipOverlaps() {
+    const tips = Array.from(document.querySelectorAll('.mark-tip, .user-tip'));
+    if (tips.length < 2) return;
+
+    // Initial rects (post-CSS-transform).
+    const rects = tips.map(t => t.getBoundingClientRect());
+
+    // Process in top-down visual order.
+    const order = tips.map((_, i) => i).sort((a, b) => rects[a].top - rects[b].top);
+
+    for (let k = 1; k < order.length; k++) {
+        const i = order[k];
+        let r = tips[i].getBoundingClientRect();
+        // Check against every earlier tip; push down by the largest needed shift.
+        let need = 0;
+        for (let m = 0; m < k; m++) {
+            const j = order[m];
+            const r2 = tips[j].getBoundingClientRect();
+            const overlap = !(r.right < r2.left || r.left > r2.right
+                            || r.bottom < r2.top || r.top > r2.bottom);
+            if (overlap) {
+                need = Math.max(need, r2.bottom - r.top + 2);
+            }
+        }
+        if (need > 0) {
+            const dpr = window.devicePixelRatio || 1;
+            const currentTop = parseFloat(tips[i].style.top) || 0;
+            // top is set in CSS px (with /dpr divisor in updateMarkTips/
+            // updateUserTips), so the shift is also in CSS px.
+            tips[i].style.top = (currentTop + need) + 'px';
+        }
+    }
 }
 
 function updateUserTips() {

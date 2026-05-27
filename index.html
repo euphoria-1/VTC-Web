@@ -608,11 +608,14 @@
     }
     .user-tip .lbl { color: #9aa6b2; margin-right: 3px; }
 
-    /* Bottom-right info strip: location | course | length | wind | strength | shift mode */
+    /* Bottom-right info strip: location | course | length | wind | strength | shift mode.
+       Sits to the LEFT of the right-side 12 h slider (slider is right:14 width:74
+       → its left edge is at right:88; we leave a 14 px gap). */
     #info-bar {
         position: absolute;
-        right: 14px;
+        right: 102px;
         bottom: 14px;
+        max-width: calc(100vw - 116px);
         padding: 6px 12px;
         background: rgba(20,20,28,0.85);
         border: 1px solid rgba(255,255,255,0.12);
@@ -622,11 +625,45 @@
         font-variant-numeric: tabular-nums;
         line-height: 1.2;
         white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
         z-index: 6;
         display: none;          /* shown by JS once a course is loaded */
-        pointer-events: none;
+        cursor: pointer;
     }
+    /* When the slider isn't on screen, the info bar can go all the way right. */
+    body:not(.locked-mode) #info-bar { right: 14px; max-width: calc(100vw - 28px); }
     #info-bar .sep { color: #6b7785; margin: 0 6px; }
+
+    /* Tap-to-toggle: every .is-collapsible overlay can be shrunk to a
+       small dot via a single tap.  Tap the dot again to re-expand.
+       NB: we only override size/contents, not `display`, so the same
+       element can still be hidden by JS via `style.display = 'none'`.   */
+    .is-collapsible      { pointer-events: auto; cursor: pointer; }
+    .is-collapsible.is-collapsed {
+        width: 20px !important;
+        min-width: 20px !important;
+        max-width: 20px !important;
+        height: 20px !important;
+        padding: 0 !important;
+        overflow: hidden;
+        line-height: 20px;
+        text-align: center;
+    }
+    .is-collapsible.is-collapsed > * { display: none !important; }
+    .is-collapsible.is-collapsed::after {
+        content: '';
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #cbd2da;
+        opacity: 0.85;
+        vertical-align: middle;
+    }
+    /* The HUD/legend live inside the pointer-events:none #top-overlay
+       container — they need to opt back in to receive their own taps. */
+    #top-overlay > .is-collapsible { pointer-events: auto; }
 
     /* Cursor tooltip */
     #tooltip {
