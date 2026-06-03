@@ -808,15 +808,14 @@ function drawCourse(ctx) {
                     ccw = turnA < 0;
                 }
 
-                const startA   = ccw ? (inA  + Math.PI / 2) : (inA  - Math.PI / 2);
-                const endA     = ccw ? (outA + Math.PI / 2) : (outA - Math.PI / 2);
-                const dynamicCx = aEntry.x - canvasR * Math.cos(startA);
-                const dynamicCy = aEntry.y - canvasR * Math.sin(startA);
+                // Use the TRUE buoy center to guarantee the arc stays anchored to the mark
+                const startA = Math.atan2(aEntry.y - ac.y, aEntry.x - ac.x);
+                const endA   = Math.atan2(aExit.y - ac.y, aExit.x - ac.x);
 
                 ctx.strokeStyle = '#FFFFFF';
                 ctx.lineWidth   = 2 * dpr;
                 ctx.beginPath();
-                ctx.arc(dynamicCx, dynamicCy, canvasR, startA, endA, ccw);
+                ctx.arc(ac.x, ac.y, canvasR, startA, endA, ccw);
                 ctx.lineTo(aExit.x, aExit.y);  // seal exit gap
                 ctx.stroke();
             }
