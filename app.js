@@ -2258,14 +2258,25 @@ window.addEventListener('resize', () => {
     // builds that still ship with the original parameter name.
     let codeData = null;
     const codeStr = params.get('course') || params.get('code');
-    if (codeStr) {
-        try {
-            const json = atob(codeStr.replace(/-/g, '+').replace(/_/g, '/'));
-            codeData = JSON.parse(json);
-        } catch (e) {
-            console.warn('Bad ?course= payload:', e);
+        if (codeStr) {
+            try {
+                // 1. Fix base64url padding/characters
+                const b64 = codeStr.replace(/-/g, '+').replace(/_/g, '/');
+                
+                // 2. Decode to a raw binary string
+                const binStr = atob(b64);
+                
+                // 3. Convert the binary string into an array of UTF-8 bytes
+                const bytes = Uint8Array.from(binStr, c => c.charCodeAt(0));
+                
+                // 4. Properly decode those bytes back into a JavaScript string
+                const json = new TextDecoder('utf-8').decode(bytes);
+                
+                codeData = JSON.parse(json);
+            } catch (e) {
+                console.warn('Bad ?course= payload:', e);
+            }
         }
-    }
     const p = key => (codeData && codeData[key] != null)
         ? codeData[key] : params.get(key);
 
