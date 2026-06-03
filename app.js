@@ -743,16 +743,20 @@ function drawCourse(ctx) {
 
     // 2) Legs (white straight + arrowhead + optional arc + optional gate).
     if (c.Legs && c.Legs.length) {
+        let overrideStartPt = null;
         for (let i = 0; i < c.Legs.length; i++) {
             const leg = c.Legs[i];
-            const sPt = (typeof leg.startX === 'number')
-                ? g2s(leg.startX, leg.startY) : slMid;
+            const sPt = overrideStartPt ? overrideStartPt : ((typeof leg.startX === 'number')
+                ? g2s(leg.startX, leg.startY) : slMid);
+            overrideStartPt = null;
             const ePt = g2s(leg.endX, leg.endY);
 
             // Straight segment.
             ctx.lineWidth   = 2 * dpr;
             ctx.strokeStyle = '#FFFFFF';
             ctx.fillStyle   = '#FFFFFF';
+            ctx.lineCap     = 'round';
+            ctx.lineJoin    = 'round';
             ctx.beginPath();
             ctx.moveTo(sPt.x, sPt.y);
             ctx.lineTo(ePt.x, ePt.y);
@@ -812,12 +816,18 @@ function drawCourse(ctx) {
                 const startA = Math.atan2(aEntry.y - ac.y, aEntry.x - ac.x);
                 const endA   = Math.atan2(aExit.y - ac.y, aExit.x - ac.x);
 
+                // Draw the true curve and capture the exact mathematical endpoint
                 ctx.strokeStyle = '#FFFFFF';
                 ctx.lineWidth   = 2 * dpr;
+                ctx.lineCap     = 'round';
                 ctx.beginPath();
                 ctx.arc(ac.x, ac.y, canvasR, startA, endA, ccw);
-                ctx.lineTo(aExit.x, aExit.y);  // seal exit gap
                 ctx.stroke();
+                
+                overrideStartPt = { 
+                    x: ac.x + canvasR * Math.cos(endA), 
+                    y: ac.y + canvasR * Math.sin(endA) 
+                };
             }
 
             // Gate line (cyan) — drawn between the two gate marks.
