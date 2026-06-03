@@ -793,11 +793,11 @@ function drawCourse(ctx) {
                 }
                 const outA = Math.atan2(nextPt.y - aExit.y, nextPt.x - aExit.x);
 
-                const inDx    = aEntry.x - sPt.x;
-                const inDy    = aEntry.y - sPt.y;
-                const chordDx = aExit.x  - aEntry.x;
-                const chordDy = aExit.y  - aEntry.y;
-                const cross   = inDx * chordDy - inDy * chordDx;
+                const inDx     = aEntry.x - sPt.x;
+                const inDy     = aEntry.y - sPt.y;
+                const centerDx = ac.x - aEntry.x;
+                const centerDy = ac.y - aEntry.y;
+                const cross    = inDx * centerDy - inDy * centerDx;
                 let ccw;
                 if (Math.abs(cross) > 1e-4) {
                     ccw = cross < 0;
