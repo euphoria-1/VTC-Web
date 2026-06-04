@@ -1880,7 +1880,7 @@ function _markTipHTML(worldX, worldY) {
         }
         if (m !== undefined) {
             const kn = m * windMultiplier(state.windForce);
-            lines.push(`<div><span class="lbl">W</span>${kn.toFixed(1)} kn @ ${_compassFrom(d).toFixed(0)}°</div>`);
+            lines.push(`<div><span class="lbl">W</span>${kn.toFixed(1)} kn | ${_compassFrom(d).toFixed(0)}°</div>`);
         }
     }
 
@@ -1890,7 +1890,7 @@ function _markTipHTML(worldX, worldY) {
         const s = bilinearSampleVector(state.activeCurrentGrid, n, gxF, gyF);
         if (s) {
             const kn = s.mag * CURRENT_MULTIPLIER;
-            lines.push(`<div><span class="lbl">C</span>${kn.toFixed(2)} kn @ ${_compassFrom(s.dir).toFixed(0)}°</div>`);
+            lines.push(`<div><span class="lbl">C</span>${kn.toFixed(2)} kn | ${_compassFrom(s.dir).toFixed(0)}°</div>`);
         }
     }
     return lines.length ? lines.join('') : null;
@@ -2214,14 +2214,14 @@ function updateTooltip(e) {
         }
         if (mag !== undefined) {
             const kn = mag * windMultiplier(state.windForce);
-            parts.push(`<div><span class="lbl">Wind</span>${kn.toFixed(1)} kn @ ${compassFrom(dir).toFixed(0)}°</div>`);
+            parts.push(`<div><span class="lbl">Wind</span>${kn.toFixed(1)} kn | ${compassFrom(dir).toFixed(0)}°</div>`);
         }
     }
     if (hasCurr && insideGrid) {
         const s = bilinearSampleVector(state.activeCurrentGrid, n, gxF, gyF);
         if (s) {
             const kn = s.mag * CURRENT_MULTIPLIER;
-            parts.push(`<div><span class="lbl">Current</span>${kn.toFixed(2)} kn @ ${compassFrom(s.dir).toFixed(0)}°</div>`);
+            parts.push(`<div><span class="lbl">Current</span>${kn.toFixed(2)} kn | ${compassFrom(s.dir).toFixed(0)}°</div>`);
         }
     }
     if (!parts.length) { hideTooltip(); return; }
