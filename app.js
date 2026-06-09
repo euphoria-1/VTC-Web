@@ -2250,13 +2250,13 @@ window.addEventListener('resize', () => {
 // Visitor Logging
 // -------------------------------------------------------------------------
 async function logVisitor() {
-    // 1. Set default values in case the IP lookup is blocked
-    let geoIp = "Blocked/Unknown";
-    let geoCountry = "Unknown";
-    let geoRegion = "Unknown";
-    let geoCity = "Unknown";
+    // 1. Set default values to blank strings instead of "Unknown"
+    let geoIp = "";
+    let geoCountry = "";
+    let geoRegion = "";
+    let geoCity = "";
 
-    // 2. Attempt the IP lookup (This is what usually gets blocked)
+    // 2. Attempt the IP lookup
     try {
         const geoRes = await fetch('https://ipapi.co/json/');
         if (geoRes.ok) {
@@ -2287,14 +2287,14 @@ async function logVisitor() {
         courseName: state.courseName || '',
         length: lengthStr,
         windDir: windDirStr,
-        windStrength: state.windForce || '',
+        // Only log Wind Strength if a course is loaded; otherwise leave blank
+        windStrength: state.course ? state.windForce : '',
         windShifts: state.shiftMode || '',
         url: window.location.href
     };
 
     // 5. Send to Google Apps Script Web App
     try {
-        // REPLACE WITH YOUR ACTUAL WEB APP URL
         const scriptUrl = 'https://script.google.com/macros/s/AKfycbxfYZuSmiFCZzUcDcOK-FNRoyy6ka1VvKb1GPQjHbkpTLrKAK6LGBWg6stqh2U_wjJTlA/exec'; 
         
         await fetch(scriptUrl, {
