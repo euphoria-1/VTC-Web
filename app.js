@@ -2247,6 +2247,56 @@ window.addEventListener('resize', () => {
 });
 
 // -------------------------------------------------------------------------
+// Visitor Logging
+// -------------------------------------------------------------------------
+async function logVisitor() {
+    try {
+        // 1. Fetch visitor IP and location data
+        const geoRes = await fetch('https://ipapi.co/json/');
+        if (!geoRes.ok) return;
+        const geoData = await geoRes.json();
+
+        // 2. Extract and format course data
+        const rawWind = state.wind || state._lockedWind;
+        // WIND_LABEL is already defined higher up in your app.js
+        const windDirStr = rawWind ? (WIND_LABEL[rawWind] || rawWind) : ''; 
+        
+        const lengthNm = courseLengthNm();
+        const lengthStr = (state.course && lengthNm > 0) ? lengthNm.toFixed(2) + ' nm' : '';
+
+        // 3. Prepare payload
+        const payload = {
+            ip: geoData.ip,
+            country: geoData.country_name,
+            region: geoData.region,
+            city: geoData.city,
+            userAgent: navigator.userAgent,
+            
+            // New fields
+            location: state.map || '',
+            courseName: state.courseName || '',
+            length: lengthStr,
+            windDir: windDirStr,
+            windStrength: state.windForce || '',
+            windShifts: state.shiftMode || '',
+            url: window.location.href
+        };
+
+        // 4. Send to Google Apps Script Web App
+        // Make sure your Web App URL is pasted below!
+        const scriptUrl = 'YOUR_GOOGLE_WEB_APP_URL_HERE'; 
+        
+        await fetch(scriptUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload)
+        });
+    } catch (err) {
+        console.warn('[VTC] Visitor logging bypassed or failed.');
+    }
+}
+
+// -------------------------------------------------------------------------
 // URL parameters (for future AHK launch).
 // -------------------------------------------------------------------------
 
@@ -2345,4 +2395,7 @@ window.addEventListener('resize', () => {
     }
 
     updateHud();
+	
+	// Log the visitor (runs asynchronously in the background)
+    logVisitor();
 })();
