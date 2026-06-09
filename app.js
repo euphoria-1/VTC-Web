@@ -2284,7 +2284,7 @@ async function logVisitor() {
 
         // 4. Send to Google Apps Script Web App
         // Make sure your Web App URL is pasted below!
-        const scriptUrl = 'YOUR_GOOGLE_WEB_APP_URL_HERE'; 
+        const scriptUrl = 'https://script.google.com/macros/s/AKfycbxfYZuSmiFCZzUcDcOK-FNRoyy6ka1VvKb1GPQjHbkpTLrKAK6LGBWg6stqh2U_wjJTlA/exec'; 
         
         await fetch(scriptUrl, {
             method: 'POST',
