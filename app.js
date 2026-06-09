@@ -2250,40 +2250,51 @@ window.addEventListener('resize', () => {
 // Visitor Logging
 // -------------------------------------------------------------------------
 async function logVisitor() {
+    // 1. Set default values in case the IP lookup is blocked
+    let geoIp = "Blocked/Unknown";
+    let geoCountry = "Unknown";
+    let geoRegion = "Unknown";
+    let geoCity = "Unknown";
+
+    // 2. Attempt the IP lookup (This is what usually gets blocked)
     try {
-        // 1. Fetch visitor IP and location data
         const geoRes = await fetch('https://ipapi.co/json/');
-        if (!geoRes.ok) return;
-        const geoData = await geoRes.json();
+        if (geoRes.ok) {
+            const geoData = await geoRes.json();
+            geoIp = geoData.ip || geoIp;
+            geoCountry = geoData.country_name || geoCountry;
+            geoRegion = geoData.region || geoRegion;
+            geoCity = geoData.city || geoCity;
+        }
+    } catch (err) {
+        console.warn('[VTC] IP lookup blocked. Proceeding with partial log.');
+    }
 
-        // 2. Extract and format course data
-        const rawWind = state.wind || state._lockedWind;
-        // WIND_LABEL is already defined higher up in your app.js
-        const windDirStr = rawWind ? (WIND_LABEL[rawWind] || rawWind) : ''; 
-        
-        const lengthNm = courseLengthNm();
-        const lengthStr = (state.course && lengthNm > 0) ? lengthNm.toFixed(2) + ' nm' : '';
+    // 3. Extract and format course data
+    const rawWind = state.wind || state._lockedWind;
+    const windDirStr = rawWind ? (WIND_LABEL[rawWind] || rawWind) : ''; 
+    const lengthNm = courseLengthNm();
+    const lengthStr = (state.course && lengthNm > 0) ? lengthNm.toFixed(2) + ' nm' : '';
 
-        // 3. Prepare payload
-        const payload = {
-            ip: geoData.ip,
-            country: geoData.country_name,
-            region: geoData.region,
-            city: geoData.city,
-            userAgent: navigator.userAgent,
-            
-            // New fields
-            location: state.map || '',
-            courseName: state.courseName || '',
-            length: lengthStr,
-            windDir: windDirStr,
-            windStrength: state.windForce || '',
-            windShifts: state.shiftMode || '',
-            url: window.location.href
-        };
+    // 4. Prepare the final payload using whatever data survived
+    const payload = {
+        ip: geoIp,
+        country: geoCountry,
+        region: geoRegion,
+        city: geoCity,
+        userAgent: navigator.userAgent,
+        location: state.map || '',
+        courseName: state.courseName || '',
+        length: lengthStr,
+        windDir: windDirStr,
+        windStrength: state.windForce || '',
+        windShifts: state.shiftMode || '',
+        url: window.location.href
+    };
 
-        // 4. Send to Google Apps Script Web App
-        // Make sure your Web App URL is pasted below!
+    // 5. Send to Google Apps Script Web App
+    try {
+        // REPLACE WITH YOUR ACTUAL WEB APP URL
         const scriptUrl = 'https://script.google.com/macros/s/AKfycbxfYZuSmiFCZzUcDcOK-FNRoyy6ka1VvKb1GPQjHbkpTLrKAK6LGBWg6stqh2U_wjJTlA/exec'; 
         
         await fetch(scriptUrl, {
@@ -2292,7 +2303,7 @@ async function logVisitor() {
             body: JSON.stringify(payload)
         });
     } catch (err) {
-        console.warn('[VTC] Visitor logging bypassed or failed.');
+        console.warn('[VTC] Failed to contact Google Apps Script log.');
     }
 }
 
